@@ -23,6 +23,42 @@ public sealed class MonitorTracesServiceTests()
 {
     private const string ResourceGroup = "rg";
 
+    [Theory]
+    [InlineData("", "empty")]
+    [InlineData("  ", "empty")]
+    [InlineData("{", "malformed JSON")]
+    [InlineData("[]", "operationId")]
+    [InlineData("null", "operationId")]
+    [InlineData("{}", "operationId")]
+    [InlineData("""{"operationId":42}""", "operationId")]
+    [InlineData("""{"operationId":""}""", "operationId")]
+    [InlineData("""{"operationId":" "}""", "operationId")]
+    public async Task Submissions_RejectInvalidResponseBeforePolling(string body, string message)
+    {
+        var end = DateTimeOffset.UtcNow;
+        foreach (var operation in new[] { "query", "compare", "critical-path" })
+        {
+            using var handler = new MonitorTracesTestHandler(1, false, submitBody: body);
+            var (service, _) = CreateService(handler);
+            var exception = await Assert.ThrowsAsync<HttpRequestException>(() => operation switch
+            {
+                "compare" => service.CompareAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
+                    "Traces", end.AddMinutes(-1), end, 10, cancellationToken: TestContext.Current.CancellationToken),
+                "critical-path" => service.CriticalPathAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
+                    "Traces", end.AddMinutes(-1), end, 10,
+                    new TraceCriticalPathSettings { TraceIds = ["0123456789abcdef0123456789abcdef"] },
+                    cancellationToken: TestContext.Current.CancellationToken),
+                _ => service.RunQueryAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
+                    "Traces", end.AddMinutes(-1), end, 10, false, cancellationToken: TestContext.Current.CancellationToken),
+            });
+
+            Assert.Equal(HttpStatusCode.BadGateway, exception.StatusCode);
+            Assert.Contains(message, exception.Message, StringComparison.Ordinal);
+            Assert.Equal(1, handler.SubmitCalls);
+            Assert.Equal(0, handler.PollCalls);
+        }
+    }
+
     [Fact]
     public async Task Compare_LowerTraceSampleDoesNotTruncateAttributeResults()
     {
@@ -487,18 +523,30 @@ public sealed class MonitorTracesServiceTests()
     }
 
     [Theory]
-    [InlineData("hasLimitReached")]
-    [InlineData("isPartialResult")]
-    [InlineData("isSystemLimitHit")]
-    public async Task ResumeQueryAsync_PreservesPartialFlagsAcrossPages(string flag)
+    [InlineData("hasLimitReached", "true", "false")]
+    [InlineData("isPartialResult", "true", "false")]
+    [InlineData("isSystemLimitHit", "true", "false")]
+    [InlineData("hasLimitReached", "\"True\"", "\"False\"")]
+    [InlineData("isPartialResult", "\"True\"", "\"False\"")]
+    [InlineData("isSystemLimitHit", "\"True\"", "\"False\"")]
+    [InlineData("isPartialResult", "false", "false")]
+    public async Task ResumeQueryAsync_PreservesPartialFlagsAcrossPages(string flag, string partial, string complete)
     {
         using var first = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent($"{{\"value\":[1],\"nextLink\":\"/ignored\",\"{flag}\":true}}")
+            Content = new StringContent($$$"""
+                {"value":[1],"nextLink":"/ignored","{{{flag}}}":{{{partial}}},
+                 "metadata":{"{{{flag}}}":{{{partial}}},"current.{{{flag}}}":{{{partial}}},
+                 "current":{"{{{flag}}}":{{{partial}}}},"RowsFound":1,"retained":true}}
+                """)
         };
         using var last = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent($"{{\"value\":[2],\"{flag}\":false}}")
+            Content = new StringContent($$$"""
+                {"value":[2],"{{{flag}}}":{{{complete}}},
+                 "metadata":{"{{{flag}}}":{{{complete}}},"current.{{{flag}}}":{{{complete}}},
+                 "current":{"{{{flag}}}":{{{complete}}}},"RowsFound":2}}
+                """)
         };
         using var handler = new MonitorTracesTestHandler(1, false, resultPages: [first, last]);
         (MonitorTracesService service, IAzureService _) = CreateService(handler);
@@ -508,7 +556,14 @@ public sealed class MonitorTracesServiceTests()
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("Succeeded", result.Status);
-        Assert.True(result.Payload!.Value.GetProperty(flag).GetBoolean());
+        var payload = result.Payload!.Value;
+        Assert.Equal(partial, payload.GetProperty(flag).GetRawText());
+        var metadata = payload.GetProperty("metadata");
+        Assert.Equal(partial, metadata.GetProperty(flag).GetRawText());
+        Assert.Equal(partial, metadata.GetProperty($"current.{flag}").GetRawText());
+        Assert.Equal(partial, metadata.GetProperty("current").GetProperty(flag).GetRawText());
+        Assert.Equal(2, metadata.GetProperty("RowsFound").GetInt32());
+        Assert.True(metadata.GetProperty("retained").GetBoolean());
         Assert.Equal(2, result.Payload.Value.GetProperty("value").GetArrayLength());
     }
 

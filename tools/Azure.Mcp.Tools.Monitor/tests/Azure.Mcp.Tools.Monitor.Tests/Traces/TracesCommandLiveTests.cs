@@ -21,7 +21,7 @@ public sealed class TracesCommandLiveTests(ITestOutputHelper output, TestProxyFi
     public override ValueTask InitializeAsync()
     {
         SetArguments("server", "start", "--mode", "all", "--namespace", "monitor",
-            "--disable-caching", "--disable-proxy-tools");
+            "--dangerously-disable-elicitation", "--disable-caching", "--disable-proxy-tools");
         return base.InitializeAsync();
     }
 
@@ -273,10 +273,8 @@ public sealed class TracesCommandLiveTests(ITestOutputHelper output, TestProxyFi
     {
         var traceAccountName = Settings.DeploymentOutputs.GetValueOrDefault("traceAccountName", $"{Settings.ResourceBaseName}-traces");
 
-        // Cancelling needs no in-flight query to cover what actually regresses here: the
-        // operations/{id}:cancel URL shape and the 404 mapping. A well-formed id that was
-        // never issued exercises both. resultProcessor returns the envelope because a failed
-        // command has no "results" property.
+        // An unknown ID covers the cancel route and 404 mapping without an in-flight query.
+        // Failed commands have no results property, so inspect the response envelope.
         var response = await CallToolAsync(
             "monitor_traces_query_cancel",
             new()

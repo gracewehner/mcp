@@ -87,5 +87,4 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
             Assert.Empty(Service.ReceivedCalls());
         }
     }
-
 }

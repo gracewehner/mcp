@@ -8,18 +8,6 @@ namespace Azure.Mcp.Tools.Monitor.Options.Traces;
 
 public sealed class TraceQueryResumeOptions : ISubscriptionOption
 {
-    [Option(Description = OptionDescriptions.Tenant)]
-    public string? Tenant { get; set; }
-
-    [Option(Description = OptionDescriptions.Subscription)]
-    public string? Subscription { get; set; }
-
-    [Option(Description = OptionDescriptions.ResourceGroup)]
-    public required string ResourceGroup { get; set; }
-
-    [Option(Description = "The name of the Azure Monitor Workspace enabled for Trace Store.")]
-    public required string Workspace { get; set; }
-
     [Option(Description = "Operation id returned by a 'monitor traces query' command.")]
     public required string OperationId { get; set; }
 
@@ -28,4 +16,16 @@ public sealed class TraceQueryResumeOptions : ISubscriptionOption
 
     [Option(Description = "Include span-level detail in the response. Default true.")]
     public bool? IncludeSpans { get; set; }
+
+    [Option(Description = OptionDescriptions.ResourceGroup)]
+    public required string ResourceGroup { get; set; }
+
+    [Option(Description = "The name of the Azure Monitor Workspace enabled for Trace Store.")]
+    public required string Workspace { get; set; }
+
+    [Option(Description = OptionDescriptions.Subscription)]
+    public string? Subscription { get; set; }
+
+    [Option(Description = OptionDescriptions.Tenant)]
+    public string? Tenant { get; set; }
 }
