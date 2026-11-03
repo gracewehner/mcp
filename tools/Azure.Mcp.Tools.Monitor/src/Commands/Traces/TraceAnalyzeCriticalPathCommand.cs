@@ -1,0 +1,104 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+using System.Text.RegularExpressions;
+using Azure.Mcp.Core.Services.Azure.Subscription;
+using Azure.Mcp.Tools.Monitor.Models.Traces;
+using Azure.Mcp.Tools.Monitor.Options.Traces;
+using Azure.Mcp.Tools.Monitor.Services.Traces;
+using Azure.Mcp.Tools.Monitor.Validation;
+using Microsoft.Extensions.Logging;
+using Microsoft.Mcp.Core.Commands;
+using Microsoft.Mcp.Core.Models.Command;
+
+namespace Azure.Mcp.Tools.Monitor.Commands.Traces;
+
+[CommandMetadata(
+    Id = "5a97dc52-dc23-4f16-99d5-11e92c7f7d09",
+    Name = "analyze-critical-path",
+    Title = "Analyze Trace Store Distributed Trace Critical Paths",
+    Description = """
+        Find spans dominating end-to-end latency on distributed-trace critical paths in Azure
+        Monitor Workspace Trace Store. Takes explicit trace IDs from monitor traces query run,
+        not a KQL filter. Returns grouped percentile durations, optional samples and per-trace totals;
+        supports cross-trace links and excluding or lowering the priority of named subtrees.
+        Uses workspace read access. If status is Running, use monitor traces query resume with
+        the returned operationId instead of resubmitting.
+        """,
+    OperationPlane = ToolOperationPlane.Data,
+    Destructive = false,
+    Idempotent = true,
+    OpenWorld = false,
+    ReadOnly = true,
+    Secret = false,
+    LocalRequired = false)]
+public sealed class TraceAnalyzeCriticalPathCommand(
+    ILogger<TraceAnalyzeCriticalPathCommand> logger,
+    IMonitorTracesService tracesService,
+    ISubscriptionResolver subscriptionResolver)
+    : BaseTraceCommand<TraceAnalyzeCriticalPathOptions, TraceQueryCommandResult>(subscriptionResolver)
+{
+    public override void ValidateOptions(TraceAnalyzeCriticalPathOptions options, ValidationResult validationResult)
+    {
+        base.ValidateOptions(options, validationResult);
+        TraceAnalysisValidator.ValidateAnalysisWindow(options.StartTime, options.EndTime, validationResult);
+        TraceAnalysisValidator.ValidateAnalysisMaxResults(options.MaxResults, 1000, validationResult);
+        if (options.TraceIds is not { Length: >= 1 and <= 1000 } ||
+            options.TraceIds.Any(id => !Guid.TryParseExact(id, "N", out _) && !Guid.TryParseExact(id, "D", out _)))
+        {
+            validationResult.AddError("--trace-ids requires 1-1000 IDs, each 32 hexadecimal characters or a GUID.", "Invalid trace-ids.");
+        }
+        if (options.AggregateBy is { Length: > 3 } ||
+            options.AggregateBy?.Any(dimension => !IsAggregationField(dimension)) == true)
+        {
+            validationResult.AddError("--aggregate-by accepts at most 3 span field or custom attribute names without brackets or quotes.", "Invalid aggregate-by.");
+        }
+        if (options.Percentiles is { Length: > 5 } || options.Percentiles?.Any(p => p is < 1 or > 99) == true)
+        {
+            validationResult.AddError("--percentiles accepts at most 5 values, each between 1 and 99.", "Invalid percentiles.");
+        }
+        if (options.ExcludeSubtreePrefixes?.Any(string.IsNullOrWhiteSpace) == true ||
+            options.DeprioritizeSubtreePrefixes?.Any(string.IsNullOrWhiteSpace) == true)
+        {
+            validationResult.AddError("Subtree prefixes must not be empty or whitespace.", "Invalid subtree prefixes.");
+        }
+    }
+
+    public override async Task<CommandResponse> ExecuteAsync(
+        CommandContext context, TraceAnalyzeCriticalPathOptions options, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var dimensions = options.AggregateBy is { Length: > 0 } ? options.AggregateBy : ["span.name"];
+            var percentiles = options.Percentiles is { Length: > 0 } ? options.Percentiles : [50, 95, 99];
+            var clauses = percentiles.Select(p => FormattableString.Invariant($"p{p}=percentile(duration_nano, {p})"));
+            var query = $"Traces | summarize {string.Join(", ", clauses)} by {string.Join(", ", dimensions.Select(d => $"['{d}']"))}";
+            var settings = new TraceCriticalPathSettings
+            {
+                TraceIds = options.TraceIds,
+                ResolveTraceLinks = options.ResolveTraceLinks ?? false,
+                IncludeSamples = options.IncludeSamples ?? true,
+                IncludeRollups = options.IncludeRollups ?? false,
+                ExcludeSubtreePrefixes = options.ExcludeSubtreePrefixes,
+                DeprioritizeSubtreePrefixes = options.DeprioritizeSubtreePrefixes,
+            };
+            var result = await tracesService.CriticalPathAsync(
+                options.Subscription!, options.ResourceGroup, options.Workspace, query,
+                options.StartTime, options.EndTime, options.MaxResults ?? 10, settings,
+                options.Tenant, cancellationToken);
+            context.Response.Results = ResponseResult.Create(
+                new TraceQueryCommandResult(result), MonitorJsonContext.Default.TraceQueryCommandResult);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Error analyzing distributed trace critical paths. Subscription: {Subscription}", options.Subscription);
+            HandleException(context, ex);
+        }
+        return context.Response;
+    }
+
+    private static bool IsAggregationField(string? value) =>
+        value is { Length: > 0 and <= 1024 } &&
+        // Custom attribute keys can contain colons and hyphens, but cannot escape the quoted KQL field.
+        Regex.IsMatch(value, @"\A[a-zA-Z_][a-zA-Z0-9_.:-]*\z", RegexOptions.NonBacktracking);
+}

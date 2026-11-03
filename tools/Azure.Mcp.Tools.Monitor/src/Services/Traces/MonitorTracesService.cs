@@ -40,6 +40,10 @@ public sealed class MonitorTracesService(
     internal const string TraceDataPlaneHostSuffix = ".data.monitor.azure.com";
     internal const string TraceDataPlaneApiVersion = "2026-01-10-preview";
 
+    private const string QueryEndpointPath = "traces:query";
+    private const string CompareEndpointPath = "traces:compare";
+    private const string CriticalPathEndpointPath = "traces:critical-path";
+
     // Bounded so a slow query hands back an operationId instead of blocking the MCP transport.
     private static readonly TimeSpan PollDelay = TimeSpan.FromSeconds(2);
     private static readonly TimeSpan MaxPollBudget = TimeSpan.FromSeconds(180);
@@ -183,7 +187,34 @@ public sealed class MonitorTracesService(
         };
     }
 
-    public async Task<TraceQueryResult> RunQueryAsync(
+    public Task<TraceQueryResult> CompareAsync(
+        string subscription,
+        string resourceGroup,
+        string workspace,
+        string query,
+        DateTimeOffset startTime,
+        DateTimeOffset endTime,
+        int maxResults,
+        string? tenant = null,
+        CancellationToken cancellationToken = default) =>
+        RunOperationAsync(subscription, resourceGroup, workspace, query, startTime, endTime,
+            maxResults, false, CompareEndpointPath, null, tenant, cancellationToken);
+
+    public Task<TraceQueryResult> CriticalPathAsync(
+        string subscription,
+        string resourceGroup,
+        string workspace,
+        string query,
+        DateTimeOffset startTime,
+        DateTimeOffset endTime,
+        int maxResults,
+        TraceCriticalPathSettings settings,
+        string? tenant = null,
+        CancellationToken cancellationToken = default) =>
+        RunOperationAsync(subscription, resourceGroup, workspace, query, startTime, endTime,
+            maxResults, false, CriticalPathEndpointPath, settings, tenant, cancellationToken);
+
+    public Task<TraceQueryResult> RunQueryAsync(
         string subscription,
         string resourceGroup,
         string workspace,
@@ -193,7 +224,23 @@ public sealed class MonitorTracesService(
         int maxResults,
         bool includeSpans,
         string? tenant = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default) =>
+        RunOperationAsync(subscription, resourceGroup, workspace, query, startTime, endTime,
+            maxResults, includeSpans, QueryEndpointPath, null, tenant, cancellationToken);
+
+    private async Task<TraceQueryResult> RunOperationAsync(
+        string subscription,
+        string resourceGroup,
+        string workspace,
+        string query,
+        DateTimeOffset startTime,
+        DateTimeOffset endTime,
+        int maxResults,
+        bool includeSpans,
+        string endpointPath,
+        TraceCriticalPathSettings? settings,
+        string? tenant,
+        CancellationToken cancellationToken)
     {
         ValidateRequiredParameters(
             (nameof(subscription), subscription),
@@ -204,10 +251,12 @@ public sealed class MonitorTracesService(
         var session = await OpenSessionAsync(subscription, resourceGroup, workspace, tenant, cancellationToken).ConfigureAwait(false);
 
         string operationId = await SendSubmitAsync(
-            session, query, startTime, endTime, maxResults, cancellationToken).ConfigureAwait(false);
+            session, query, startTime, endTime, maxResults, endpointPath, settings, cancellationToken).ConfigureAwait(false);
 
+        // Compare samples traces, but returns attribute rows: a lower sample must not stop result paging.
+        var maxRows = endpointPath == CompareEndpointPath ? MaxResumeRows : maxResults;
         return await PollForResultsAsync(
-            session, operationId, maxResults, maxResults, includeSpans, cancellationToken).ConfigureAwait(false);
+            session, operationId, Math.Min(maxRows, 1000), maxRows, includeSpans, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<TraceQueryResult> ResumeQueryAsync(
@@ -394,9 +443,11 @@ public sealed class MonitorTracesService(
         DateTimeOffset startTime,
         DateTimeOffset endTime,
         int maxResults,
+        string endpointPath,
+        TraceCriticalPathSettings? settings,
         CancellationToken cancellationToken)
     {
-        var submitUrl = $"{session.EndpointBase}/traces:query?preserveQueryFieldNames=true&api-version={TraceDataPlaneApiVersion}";
+        var submitUrl = $"{session.EndpointBase}/{endpointPath}?preserveQueryFieldNames=true&api-version={TraceDataPlaneApiVersion}";
 
         var body = new TraceQueryRequest
         {
@@ -408,7 +459,16 @@ public sealed class MonitorTracesService(
                 StartTime = FormatUtc(startTime),
                 EndTime = FormatUtc(endTime),
             },
-            Options = new TraceQueryOptionsBody { MaxResults = maxResults },
+            TraceId = settings is null ? null : string.Join(",", settings.TraceIds),
+            Options = new TraceQueryOptionsBody
+            {
+                MaxResults = maxResults,
+                ResolveTraceLinks = settings?.ResolveTraceLinks,
+                IncludeSamples = settings?.IncludeSamples,
+                IncludeRollups = settings?.IncludeRollups,
+                ExcludeSubtreePrefixes = settings?.ExcludeSubtreePrefixes,
+                DeprioritizeSubtreePrefixes = settings?.DeprioritizeSubtreePrefixes,
+            },
         };
 
         var content = RequestContent.Create(
@@ -587,9 +647,9 @@ public sealed class MonitorTracesService(
 
     private static string FormatUtc(DateTimeOffset value)
     {
-        // Trace data-plane strictly requires the trailing 'Z' form (e.g. 2026-07-24T18:03:00Z).
-        // DateTimeOffset.ToString("o") emits +00:00 offset instead, which fails validation.
-        return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ", System.Globalization.CultureInfo.InvariantCulture);
+        // Preserve fractional seconds so compare's embedded selection stays inside the outer window.
+        // The data plane requires a trailing 'Z', not DateTimeOffset's +00:00 offset.
+        return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", System.Globalization.CultureInfo.InvariantCulture); // cspell:ignore FFFFFFFZ
     }
 
     private static string Truncate(string content, int max = 1024)

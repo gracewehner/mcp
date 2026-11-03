@@ -23,6 +23,97 @@ public sealed class MonitorTracesServiceTests()
 {
     private const string ResourceGroup = "rg";
 
+    [Fact]
+    public async Task Compare_LowerTraceSampleDoesNotTruncateAttributeResults()
+    {
+        using var page = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"value":[{"attribute":"span.name"}],"nextLink":"more"}""")
+        };
+        using var finalPage = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"value":[{"attribute":"span.status"}]}""")
+        };
+        using var handler = new MonitorTracesTestHandler(1, false, resultPages: [page, finalPage]);
+        var (service, _) = CreateService(handler);
+        var end = DateTimeOffset.Parse("2026-10-12T01:00:00.3456789Z", System.Globalization.CultureInfo.InvariantCulture);
+
+        var result = await service.CompareAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
+            "analysis KQL", end.AddHours(-1), end, 1, cancellationToken: TestContext.Current.CancellationToken);
+
+        using var body = JsonDocument.Parse(handler.LastSubmitBody!);
+        Assert.Equal(1, body.RootElement.GetProperty("options").GetProperty("maxResults").GetInt32());
+        Assert.Equal(2, result.Payload!.Value.GetProperty("value").GetArrayLength());
+        Assert.False(result.OutputLimitReached);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Analysis_SubmitsCorrectWireContractAndSharesResumeCancelLifecycle(bool criticalPath)
+    {
+        using var page = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"value":[]}""")
+        };
+        using var handler = new MonitorTracesTestHandler(1, false, resultPages: [page]);
+        var (service, _) = CreateService(handler);
+        var end = DateTimeOffset.Parse("2026-10-12T01:00:00.3456789Z", System.Globalization.CultureInfo.InvariantCulture);
+        const string query = "analysis KQL";
+        var result = criticalPath
+            ? await service.CriticalPathAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
+                query, end.AddHours(-1), end, 1000, new TraceCriticalPathSettings
+                {
+                    TraceIds = ["abcdef1234567890abcdef1234567890", "01234567-89ab-cdef-0123-456789abcdef"],
+                    ResolveTraceLinks = true,
+                    IncludeSamples = false,
+                    IncludeRollups = true,
+                    ExcludeSubtreePrefixes = ["sql.", "a'quoted\\prefix"],
+                    DeprioritizeSubtreePrefixes = ["background."],
+                }, cancellationToken: TestContext.Current.CancellationToken)
+            : await service.CompareAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
+                query, end.AddHours(-1), end, 10000, cancellationToken: TestContext.Current.CancellationToken);
+
+        Assert.EndsWith(criticalPath ? "/traces:critical-path" : "/traces:compare", handler.LastSubmitUri!.AbsolutePath, StringComparison.Ordinal);
+        using var body = JsonDocument.Parse(handler.LastSubmitBody!);
+        var root = body.RootElement;
+        Assert.Equal("2026-10-12T00:00:00.3456789Z", root.GetProperty("timeRange").GetProperty("startTime").GetString());
+        Assert.Equal("2026-10-12T01:00:00.3456789Z", root.GetProperty("timeRange").GetProperty("endTime").GetString());
+        var options = root.GetProperty("options");
+        Assert.Equal(criticalPath ? 1000 : 10000, options.GetProperty("maxResults").GetInt32());
+        Assert.Contains("top=1000&", handler.LastDataPlaneUri!.Query);
+        if (criticalPath)
+        {
+            Assert.Equal("abcdef1234567890abcdef1234567890,01234567-89ab-cdef-0123-456789abcdef", root.GetProperty("traceId").GetString());
+            Assert.True(options.GetProperty("resolveTraceLinks").GetBoolean());
+            Assert.False(options.GetProperty("includeSamples").GetBoolean());
+            Assert.True(options.GetProperty("includeRollups").GetBoolean());
+            Assert.Equal("a'quoted\\prefix", options.GetProperty("excludeSubtreePrefixes")[1].GetString());
+            Assert.Equal("background.", options.GetProperty("deprioritizeSubtreePrefixes")[0].GetString());
+        }
+        else
+        {
+            Assert.False(root.TryGetProperty("traceId", out _));
+            Assert.False(options.TryGetProperty("resolveTraceLinks", out _));
+        }
+        Assert.Equal("Succeeded", result.Status);
+
+        var resumed = await service.ResumeQueryAsync(
+            MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0", result.OperationId!,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(result.OperationId, resumed.OperationId);
+        Assert.EndsWith($"/operations/{result.OperationId}/results", handler.LastDataPlaneUri!.AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal(2, handler.PollCalls);
+
+        var cancelled = await service.CancelQueryAsync(
+            MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0", result.OperationId!,
+            cancellationToken: TestContext.Current.CancellationToken);
+        Assert.Equal(result.OperationId, cancelled.OperationId);
+        Assert.Equal("Cancelled", cancelled.Status);
+        Assert.EndsWith($"/operations/{result.OperationId}:cancel", handler.LastDataPlaneUri!.AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal(1, handler.SubmitCalls);
+    }
+
     [Theory]
     [InlineData(0, false)]
     [InlineData(0, true)]

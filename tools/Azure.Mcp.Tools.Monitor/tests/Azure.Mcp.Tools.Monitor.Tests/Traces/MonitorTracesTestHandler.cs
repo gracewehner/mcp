@@ -22,6 +22,7 @@ internal sealed class MonitorTracesTestHandler(
     public int SubmitCalls { get; private set; }
     public int PollCalls { get; private set; }
     public string? LastSubmitBody { get; private set; }
+    public Uri? LastSubmitUri { get; private set; }
     public string? LastGraphQuery { get; private set; }
     public Uri? LastDataPlaneUri { get; private set; }
     public Uri? LastWorkspaceUri { get; private set; }
@@ -32,9 +33,12 @@ internal sealed class MonitorTracesTestHandler(
         {
             DataPlaneCalls++;
             LastDataPlaneUri = request.RequestUri;
-            if (request.RequestUri.AbsolutePath.EndsWith("/traces:query", StringComparison.Ordinal))
+            if (request.RequestUri.AbsolutePath.EndsWith("/traces:query", StringComparison.Ordinal) ||
+                request.RequestUri.AbsolutePath.EndsWith("/traces:compare", StringComparison.Ordinal) ||
+                request.RequestUri.AbsolutePath.EndsWith("/traces:critical-path", StringComparison.Ordinal))
             {
                 SubmitCalls++;
+                LastSubmitUri = request.RequestUri;
                 LastSubmitBody = await request.Content!.ReadAsStringAsync(cancellationToken);
                 return new(HttpStatusCode.Accepted) { Content = new StringContent("""{"operationId":"op-1234"}""") };
             }

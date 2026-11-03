@@ -4072,6 +4072,23 @@ Consolidated mode exposes resume as `resume_azure_monitor_trace_query` because e
 azmcp monitor traces account list --subscription <subscription> \
                                   [--resource-group <resource-group>]
 
+# Analyze the critical paths of explicit Trace Store trace IDs
+# ❌ Destructive | ✅ Idempotent | ❌ OpenWorld | ✅ ReadOnly | ❌ Secret | ❌ LocalRequired
+azmcp monitor traces query analyze-critical-path --subscription <subscription> \
+                                                 --resource-group <resource-group> \
+                                                 --workspace <workspace> \
+                                                 --trace-ids <trace-id> [<trace-id> ...] \
+                                                 --start-time <iso-8601> \
+                                                 --end-time <iso-8601> \
+                                                 [--aggregate-by <field> [<field> ...]] \
+                                                 [--percentiles <n> [<n> ...]] \
+                                                 [--exclude-subtree-prefixes <prefix> [<prefix> ...]] \
+                                                 [--deprioritize-subtree-prefixes <prefix> [<prefix> ...]] \
+                                                 [--resolve-trace-links <true|false>] \
+                                                 [--include-samples <true|false>] \
+                                                 [--include-rollups <true|false>] \
+                                                 [--max-results <n>]
+
 # List the trace and span schema field names for a distributed-trace account
 # ❌ Destructive | ✅ Idempotent | ❌ OpenWorld | ✅ ReadOnly | ❌ Secret | ❌ LocalRequired
 azmcp monitor traces field list --subscription <subscription> \
@@ -4105,6 +4122,22 @@ azmcp monitor traces query cancel --subscription <subscription> \
                                   --resource-group <resource-group> \
                                   --workspace <workspace> \
                                   --operation-id <operation-id>
+
+# Find the top attributes distinguishing anomalous Trace Store traces from the overall pool
+# ❌ Destructive | ✅ Idempotent | ❌ OpenWorld | ✅ ReadOnly | ❌ Secret | ❌ LocalRequired
+azmcp monitor traces query analyze-top-attributes --subscription <subscription> \
+                                                  --resource-group <resource-group> \
+                                                  --workspace <workspace> \
+                                                  --overall-start-time <iso-8601> \
+                                                  --overall-end-time <iso-8601> \
+                                                  --selection-start-time <iso-8601> \
+                                                  --selection-end-time <iso-8601> \
+                                                  --selection-field <field> \
+                                                  --selection-op <operator> \
+                                                  --selection-value <literal> \
+                                                  [--overall-query <kql-query>] \
+                                                  [--top-n <n>] \
+                                                  [--max-results <n>]
 
 ```
 
