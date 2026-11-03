@@ -34,7 +34,6 @@ words:
   - createorupdate
   - databaseaccounts
   - deviceregistry
-  - deprioritize
   - discoverability
   - domainservices
   - donet
@@ -86,7 +85,6 @@ words:
   - registeredserver
   - reprotect
   - reprotection
-  - rollups
   - scheduledtasks
   - serviceaccount
   - servicefabric
