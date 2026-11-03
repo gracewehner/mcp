@@ -1,8 +1,6 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// cspell:ignore FFFFFFFZ
-
 using System.Text.Json;
 using Azure.Core;
 using Azure.Core.Pipeline;
@@ -652,9 +650,9 @@ public sealed partial class MonitorTracesService(
 
     private static string FormatUtc(DateTimeOffset value)
     {
-        // Trace data-plane strictly requires the trailing 'Z' form (e.g. 2026-07-24T18:03:00Z).
-        // DateTimeOffset.ToString("o") emits +00:00 offset instead, which fails validation.
-        return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", System.Globalization.CultureInfo.InvariantCulture);
+        // Preserve fractional seconds so compare's embedded selection stays inside the outer window.
+        // The data plane requires a trailing 'Z', not DateTimeOffset's +00:00 offset.
+        return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", System.Globalization.CultureInfo.InvariantCulture); // cspell:ignore FFFFFFFZ
     }
 
     private static string Truncate(string content, int max = 1024)
