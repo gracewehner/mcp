@@ -4097,6 +4097,38 @@ azmcp monitor traces field list --subscription <subscription> \
                                 --resource-group <resource-group> \
                                 --workspace <workspace>
 
+# Compare independent attribute populations
+# ❌ Destructive | ✅ Idempotent | ❌ OpenWorld | ✅ ReadOnly | ❌ Secret | ❌ LocalRequired
+azmcp monitor traces query analyze-compare-attributes --subscription <subscription> \
+                                        --resource-group <resource-group> --workspace <workspace> \
+                                        --query <current-kql> --start-time <iso-8601> --end-time <iso-8601> \
+                                        [--compare-query <comparison-kql>] \
+                                        [--compare-start-time <iso-8601> --compare-end-time <iso-8601>] \
+                                        [--max-results <n>]
+
+# Compare critical paths for explicit IDs or filters-only discovery queries
+# ❌ Destructive | ✅ Idempotent | ❌ OpenWorld | ✅ ReadOnly | ❌ Secret | ❌ LocalRequired
+azmcp monitor traces query analyze-compare-critical-path --subscription <subscription> \
+                                          --resource-group <resource-group> --workspace <workspace> \
+                                          --start-time <iso-8601> --end-time <iso-8601> \
+                                          [--trace-ids <ids> | --query <selection-kql>] \
+                                          [--compare-trace-ids <ids> | --compare-query <selection-kql>] \
+                                          [--compare-start-time <iso-8601> --compare-end-time <iso-8601>] \
+                                          [--aggregate-by <fields>] [--percentiles <values>] \
+                                          [--include-samples <true|false>] [--include-rollups <true|false>] \
+                                          [--resolve-trace-links <true|false>] [--max-results <n>] \
+                                          [--exclude-subtree-prefixes <prefixes>] \
+                                          [--deprioritize-subtree-prefixes <prefixes>]
+
+# Compare matching statistics shapes over independent populations
+# ❌ Destructive | ✅ Idempotent | ❌ OpenWorld | ✅ ReadOnly | ❌ Secret | ❌ LocalRequired
+azmcp monitor traces query analyze-compare-statistics --subscription <subscription> \
+                                        --resource-group <resource-group> --workspace <workspace> \
+                                        --query <current-kql> --start-time <iso-8601> --end-time <iso-8601> \
+                                        [--compare-query <comparison-kql>] \
+                                        [--compare-start-time <iso-8601> --compare-end-time <iso-8601>] \
+                                        [--max-results <n>]
+
 # Resume polling an existing query without submitting a new one
 # ❌ Destructive | ❌ Idempotent | ❌ OpenWorld | ✅ ReadOnly | ❌ Secret | ❌ LocalRequired
 azmcp monitor traces query resume --subscription <subscription> \

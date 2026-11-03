@@ -13,20 +13,25 @@ internal sealed class MonitorTracesTestHandler(
     string endpoint = "https://amw.data.monitor.azure.com",
     string cancelBody = """{"status":"Cancelled"}""",
     IEnumerable<HttpResponseMessage>? resultPages = null,
-    HttpResponseMessage? submitResponse = null) : HttpMessageHandler
+    HttpResponseMessage? submitResponse = null,
+    string accountId = MonitorTracesTestHandler.TraceAccount,
+    string submitBody = """{"operationId":"op-1234"}""") : HttpMessageHandler
 {
     private readonly Queue<HttpResponseMessage> _resultPages = new(resultPages ?? []);
     internal const string Subscription = "00000000-0000-0000-0000-000000000001";
+    internal const string TraceAccount = "00000000-0000-0000-0000-000000000003";
     internal const string AccountPrefix = $"/subscriptions/{Subscription}/resourceGroups/rg/providers/Microsoft.Monitor/accounts";
 
     public int DataPlaneCalls { get; private set; }
     public int SubmitCalls { get; private set; }
     public int PollCalls { get; private set; }
     public string? LastSubmitBody { get; private set; }
-    public Uri? LastSubmitUri { get; private set; }
+    public Uri? LastSubmitUri => SubmitUris.LastOrDefault();
     public string? LastGraphQuery { get; private set; }
     public Uri? LastDataPlaneUri { get; private set; }
     public Uri? LastWorkspaceUri { get; private set; }
+    public List<Uri> SubmitUris { get; } = [];
+    public List<string> SubmitBodies { get; } = [];
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
@@ -34,14 +39,13 @@ internal sealed class MonitorTracesTestHandler(
         {
             DataPlaneCalls++;
             LastDataPlaneUri = request.RequestUri;
-            if (request.RequestUri.AbsolutePath.EndsWith("/traces:query", StringComparison.Ordinal) ||
-                request.RequestUri.AbsolutePath.EndsWith("/traces:compare", StringComparison.Ordinal) ||
-                request.RequestUri.AbsolutePath.EndsWith("/traces:critical-path", StringComparison.Ordinal))
+            if (request.Method == HttpMethod.Post && request.RequestUri.AbsolutePath.Contains("/traces:", StringComparison.Ordinal))
             {
                 SubmitCalls++;
-                LastSubmitUri = request.RequestUri;
                 LastSubmitBody = await request.Content!.ReadAsStringAsync(cancellationToken);
-                return submitResponse ?? new(HttpStatusCode.Accepted) { Content = new StringContent("""{"operationId":"op-1234"}""") };
+                SubmitUris.Add(request.RequestUri);
+                SubmitBodies.Add(LastSubmitBody);
+                return submitResponse ?? new(HttpStatusCode.Accepted) { Content = new StringContent(submitBody) };
             }
 
             if (request.RequestUri.AbsolutePath.EndsWith("/results", StringComparison.Ordinal))
@@ -81,7 +85,7 @@ internal sealed class MonitorTracesTestHandler(
             LastWorkspaceUri = request.RequestUri;
             return new(HttpStatusCode.OK)
             {
-                Content = new StringContent($$$$"""{"id":"{{{{path}}}}","name":"amw0","type":"Microsoft.Monitor/accounts","properties":{"endpoints":{"query":"{{{{endpoint}}}}"}}}""")
+                Content = new StringContent($$$$"""{"id":"{{{{path}}}}","name":"amw0","type":"Microsoft.Monitor/accounts","properties":{"accountId":"{{{{accountId}}}}","endpoints":{"query":"{{{{endpoint}}}}"}}}""")
             };
         }
         Assert.StartsWith(AccountPrefix + "/amw", path, StringComparison.Ordinal);
