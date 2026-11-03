@@ -113,6 +113,9 @@ public class MonitorSetup : IAreaSetup
         services.AddSingleton<TraceQueryCancelCommand>();
         services.AddSingleton<TraceAnalyzeTopAttributesCommand>();
         services.AddSingleton<TraceAnalyzeCriticalPathCommand>();
+        services.AddSingleton<TraceCompareAttributesCommand>();
+        services.AddSingleton<TraceCompareCriticalPathCommand>();
+        services.AddSingleton<TraceCompareStatisticsCommand>();
     }
 
     public CommandGroup RegisterCommands(IServiceProvider serviceProvider)
@@ -220,6 +223,9 @@ public class MonitorSetup : IAreaSetup
         traceQuery.AddCommand<TraceQueryRunCommand>(serviceProvider);
         traceQuery.AddCommand<TraceQueryResumeCommand>(serviceProvider);
         traceQuery.AddCommand<TraceQueryCancelCommand>(serviceProvider);
+        traceQuery.AddCommand<TraceCompareAttributesCommand>(serviceProvider);
+        traceQuery.AddCommand<TraceCompareCriticalPathCommand>(serviceProvider);
+        traceQuery.AddCommand<TraceCompareStatisticsCommand>(serviceProvider);
 
         return monitor;
     }

@@ -561,7 +561,7 @@ public sealed class MonitorTracesServiceTests()
         Assert.Equal("received", error.PartialResult.Payload!.Value.GetProperty("value")[0].GetProperty("trace_id").GetString());
     }
 
-    private static (MonitorTracesService Service, IAzureService AzureService) CreateService(
+    internal static (MonitorTracesService Service, IAzureService AzureService) CreateService(
         MonitorTracesTestHandler handler, IDateTimeProvider? clock = null)
     {
         var armClient = new HttpClient(handler, disposeHandler: false);

@@ -1,0 +1,81 @@
+// Copyright (c) Microsoft Corporation.
+// Licensed under the MIT License.
+
+using System.Net;
+using Azure.Mcp.Tests.Commands;
+using Azure.Mcp.Tools.Monitor.Commands.Traces;
+using Azure.Mcp.Tools.Monitor.Models.Traces;
+using Azure.Mcp.Tools.Monitor.Options.Traces;
+using Azure.Mcp.Tools.Monitor.Services.Traces;
+using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Mcp.Core.Commands;
+using NSubstitute;
+using Xunit;
+
+namespace Azure.Mcp.Tools.Monitor.Tests.Traces;
+
+public sealed class TraceCompareCriticalPathCommandTests()
+    : SubscriptionCommandUnitTestsBase<TraceCompareCriticalPathCommand, IMonitorTracesService>
+{
+    private const string Id = "0123456789abcdef0123456789abcdef";
+    private const string Target = "--subscription sub --resource-group rg --workspace amw --start-time 2026-01-02T00:00:00Z --end-time 2026-01-02T01:00:00Z";
+
+    [Fact]
+    public void ValidateOptions_CollectsErrorsForBothPopulationQueries()
+    {
+        var command = new TraceCompareCriticalPathCommand(
+            NullLogger<TraceCompareCriticalPathCommand>.Instance, Service, SubscriptionResolver);
+        var validation = new ValidationResult();
+        command.ValidateOptions(new TraceCompareOptions
+        {
+            Subscription = "sub",
+            Workspace = "amw",
+            ResourceGroup = "rg",
+            StartTime = "2026-01-02T00:00:00Z",
+            EndTime = "2026-01-02T01:00:00Z",
+            Query = "Traces // comment",
+            CompareQuery = "Traces | where root_span_name == 'unterminated",
+        }, validation);
+
+        Assert.Equal(2, validation.Errors.Count);
+        Assert.Contains(validation.Errors, error => error.Contains("current", StringComparison.Ordinal)
+            && error.Contains("comments", StringComparison.Ordinal));
+        Assert.Contains(validation.Errors, error => error.Contains("comparison", StringComparison.Ordinal)
+            && error.Contains("unterminated", StringComparison.Ordinal));
+        Assert.Empty(Service.ReceivedCalls());
+    }
+
+    [Theory]
+    [InlineData($"--trace-ids {Id} --compare-trace-ids {Id}", true)]
+    [InlineData("--trace-ids 01234567-89ab-cdef-0123-456789abcdef --compare-trace-ids 01234567-89ab-cdef-0123-456789abcdef", true)]
+    [InlineData("--query Traces --compare-query Traces", true)]
+    [InlineData("--query \"Traces | where root_span_name == 'GET|POST'\" --compare-query \"Traces | where root_span_name == '$$'\"", true)]
+    [InlineData("--query \"Traces | where root_span_name == 'it''s|POST$$'\" --compare-query \"Traces | where root_span_name == @'it''s|POST$$'\"", true)]
+    [InlineData($"--trace-ids {Id} --compare-query Traces", true)]
+    [InlineData($"--trace-ids {Id} --query Traces --compare-trace-ids {Id}", false)]
+    [InlineData($"--trace-ids invalid --compare-trace-ids {Id}", false)]
+    [InlineData($"--trace-ids {Id}", false)]
+    [InlineData("--query \"Traces | project trace_id\" --compare-query Traces", false)]
+    [InlineData("--query \"Traces | summarize count=count() by trace_id\" --compare-query Traces", false)]
+    [InlineData("--query Traces --compare-query Traces --aggregate-by evil/field", false)]
+    [InlineData("--query Traces --compare-query Traces --percentiles 100", false)]
+    public async Task ValidatesIdsFiltersAndGrouping(string args, bool valid)
+    {
+        Service.ComparePopulationsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<TraceComparisonRequest>(), Arg.Any<string?>(), Arg.Any<string?>(),
+            Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "operation" });
+        var response = await ExecuteCommandAsync($"{Target} {args}");
+        Assert.Equal(valid ? HttpStatusCode.OK : HttpStatusCode.BadRequest, response.Status);
+        if (!valid)
+        {
+            Assert.Empty(Service.ReceivedCalls());
+        }
+        else
+        {
+            await Service.Received(1).ComparePopulationsAsync("sub", "rg", "amw", "critical-path",
+                Arg.Is<TraceComparisonRequest>(r => r.Current.Options!.IncludeSamples == true && r.Current.Options.ResolveTraceLinks == false),
+                "Traces | summarize p50=percentile(duration_nano, 50), p95=percentile(duration_nano, 95), p99=percentile(duration_nano, 99) by ['span.name']",
+                Arg.Any<string?>(), Arg.Any<CancellationToken>());
+        }
+    }
+}

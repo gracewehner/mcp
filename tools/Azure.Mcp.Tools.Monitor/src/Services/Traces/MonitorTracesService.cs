@@ -1,6 +1,8 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+// cspell:ignore FFFFFFFZ
+
 using System.Text.Json;
 using Azure.Core;
 using Azure.Core.Pipeline;
@@ -21,7 +23,7 @@ namespace Azure.Mcp.Tools.Monitor.Services.Traces;
 /// Backing service for the <c>monitor traces</c> sub-namespace. A trace account is an Azure Monitor
 /// Workspace enabled for Trace Store by creating its <c>traceContainers/default</c> sub-resource.
 /// </summary>
-public sealed class MonitorTracesService(
+public sealed partial class MonitorTracesService(
     IAzureService azureService,
     ICacheService cacheService,
     ILogger<MonitorTracesService> logger,
@@ -58,7 +60,7 @@ public sealed class MonitorTracesService(
     private static readonly TimeSpan EndpointCacheDuration = TimeSpan.FromMinutes(5);
 
     /// <summary>Everything a data-plane call needs: resolved account, base URL, token and pipeline.</summary>
-    private sealed record TraceSession(string AmwResourceId, string EndpointBase, string Token, HttpPipeline Pipeline);
+    private sealed record TraceSession(string AmwResourceId, string EndpointBase, string? AccountId, string Token, HttpPipeline Pipeline);
 
     private async Task<TraceSession> OpenSessionAsync(
         string subscription,
@@ -75,7 +77,7 @@ public sealed class MonitorTracesService(
                 $"Azure Monitor Trace Store has no published data-plane audience for {cloud}. "
                 + "The 'monitor traces' commands are Azure public cloud only."),
         };
-        var (amwResourceId, endpointBase) = await ResolveTraceEndpointAsync(
+        var (amwResourceId, endpointBase, accountId) = await ResolveTraceEndpointAsync(
             subscription, resourceGroup, workspace, tenant, cancellationToken).ConfigureAwait(false);
         ValidateTraceEndpoint(AzureService, endpointBase);
         TokenCredential credential = await GetCredential(tenant, cancellationToken).ConfigureAwait(false);
@@ -87,7 +89,7 @@ public sealed class MonitorTracesService(
         options.Retry.NetworkTimeout = MaxPollBudget;
         options.Transport = new HttpClientTransport(AzureService.GetClient());
 
-        return new TraceSession(amwResourceId, endpointBase, token.Token, HttpPipelineBuilder.Build(options));
+        return new TraceSession(amwResourceId, endpointBase, accountId, token.Token, HttpPipelineBuilder.Build(options));
     }
 
     private async Task<Response> SendDataPlaneAsync(
@@ -333,7 +335,7 @@ public sealed class MonitorTracesService(
         return new TraceQueryCancelResult { OperationId = operationId, Status = status };
     }
 
-    private async Task<(string AmwResourceId, string EndpointBase)> ResolveTraceEndpointAsync(
+    private async Task<(string AmwResourceId, string EndpointBase, string? AccountId)> ResolveTraceEndpointAsync(
         string subscription,
         string resourceGroup,
         string workspace,
@@ -352,7 +354,7 @@ public sealed class MonitorTracesService(
             .ConfigureAwait(false);
         if (cached is not null)
         {
-            return (cached.AmwResourceId, cached.Endpoint);
+            return (cached.AmwResourceId, cached.Endpoint, cached.AccountId);
         }
 
         ResourceGroupResource resourceGroupResource = await AzureService.GetResourceGroupResource(
@@ -368,18 +370,21 @@ public sealed class MonitorTracesService(
             ?? throw new InvalidOperationException(
                 $"Azure Monitor Workspace '{workspace}' does not publish a data-plane query endpoint. The workspace "
                 + $"may need an endpoints refresh (GET + PUT at api-version {MonitorAccountApiVersion}).");
+        using var properties = ParseProperties(amw.Data.Properties);
+        string? accountId = properties?.RootElement.TryGetProperty("accountId", out var id) == true
+            && id.ValueKind == JsonValueKind.String ? id.GetString() : null;
 
         ValidateTraceEndpoint(AzureService, endpoint);
 
         var endpointBase = endpoint.TrimEnd('/');
         await cacheService
-            .SetAsync(CacheGroup, cacheKey, new CachedTraceEndpoint(amwResourceId, endpointBase), EndpointCacheDuration, cancellationToken)
+            .SetAsync(CacheGroup, cacheKey, new CachedTraceEndpoint(amwResourceId, endpointBase, accountId), EndpointCacheDuration, cancellationToken)
             .ConfigureAwait(false);
 
-        return (amwResourceId, endpointBase);
+        return (amwResourceId, endpointBase, accountId);
     }
 
-    private sealed record CachedTraceEndpoint(string AmwResourceId, string Endpoint);
+    private sealed record CachedTraceEndpoint(string AmwResourceId, string Endpoint, string? AccountId);
 
     // Every field that selects a workspace must be in the key; CacheKeyBuilder length-prefixes each
     // part so adjacent values can't run together into a collision.
@@ -447,8 +452,6 @@ public sealed class MonitorTracesService(
         string? traceId,
         CancellationToken cancellationToken)
     {
-        var submitUrl = $"{session.EndpointBase}/{endpointPath}?preserveQueryFieldNames=true&api-version={TraceDataPlaneApiVersion}";
-
         var body = new TraceQueryRequest
         {
             TraceAccountId = session.AmwResourceId,
@@ -463,10 +466,20 @@ public sealed class MonitorTracesService(
             Options = options,
         };
 
-        var content = RequestContent.Create(
+        using var content = RequestContent.Create(
             JsonSerializer.SerializeToUtf8Bytes(body, MonitorJsonContext.Default.TraceQueryRequest));
 
-        using var response = await SendDataPlaneAsync(session, RequestMethod.Post, submitUrl, content, cancellationToken).ConfigureAwait(false);
+        return await SendSubmitAsync(session, endpointPath, content, cancellationToken);
+    }
+
+    private async Task<string> SendSubmitAsync(
+        TraceSession session,
+        string endpointPath,
+        RequestContent content,
+        CancellationToken cancellationToken)
+    {
+        var submitUrl = $"{session.EndpointBase}/{endpointPath}?preserveQueryFieldNames=true&api-version={TraceDataPlaneApiVersion}";
+        using var response = await SendDataPlaneAsync(session, RequestMethod.Post, submitUrl, content, cancellationToken);
         var payload = response.Content.ToString();
 
         if (response.Status != 202)
@@ -639,9 +652,9 @@ public sealed class MonitorTracesService(
 
     private static string FormatUtc(DateTimeOffset value)
     {
-        // Preserve fractional seconds so compare's embedded selection stays inside the outer window.
-        // The data plane requires a trailing 'Z', not DateTimeOffset's +00:00 offset.
-        return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", System.Globalization.CultureInfo.InvariantCulture); // cspell:ignore FFFFFFFZ
+        // Trace data-plane strictly requires the trailing 'Z' form (e.g. 2026-07-24T18:03:00Z).
+        // DateTimeOffset.ToString("o") emits +00:00 offset instead, which fails validation.
+        return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string Truncate(string content, int max = 1024)
