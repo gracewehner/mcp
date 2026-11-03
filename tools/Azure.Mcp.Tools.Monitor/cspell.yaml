@@ -22,7 +22,6 @@ words:
   - boto
   - botocore
   - configurator
-  - deprioritize
   - ecommerce
   - enduser
   - entityframework
@@ -64,7 +63,6 @@ words:
   - pyproject
   - rediss
   - remoulade
-  - rollups
   - runserver
   - setdefault
   - sqlalchemy
