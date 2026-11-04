@@ -1,8 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-// cspell:ignore FFFFFFFZ
-
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Azure.Mcp.Core.Services.Azure.Subscription;
@@ -16,14 +15,16 @@ using Microsoft.Mcp.Core.Models.Command;
 
 namespace Azure.Mcp.Tools.Monitor.Commands.Traces;
 
-public abstract class BaseTraceCompareCommand(
+public abstract class BaseTraceCompareCommand<
+    [DynamicallyAccessedMembers(TrimAnnotations.CommandAnnotations)] TOptions>(
     ILogger logger,
     IMonitorTracesService service,
     ISubscriptionResolver subscriptionResolver,
     string analysis)
-    : BaseTraceCommand<TraceCompareOptions, TraceQueryCommandResult>(subscriptionResolver)
+    : BaseTraceCommand<TOptions, TraceQueryCommandResult>(subscriptionResolver)
+    where TOptions : class, ITraceCompareOptions
 {
-    public override void ValidateOptions(TraceCompareOptions options, ValidationResult validationResult)
+    public override void ValidateOptions(TOptions options, ValidationResult validationResult)
     {
         base.ValidateOptions(options, validationResult);
         void Reject(string message) => validationResult.AddError(message, message);
@@ -44,16 +45,20 @@ public abstract class BaseTraceCompareCommand(
                 Reject("Population queries must contain 1..100000 characters.");
             }
         }
-        if (analysis == "critical-path")
+        if (analysis == TraceComparisonAnalysis.CriticalPath)
         {
-            ValidateSelection(options.TraceIds, options.Query, "current", validationResult);
-            ValidateSelection(options.CompareTraceIds, options.CompareQuery, "comparison", validationResult);
-            if (options.AggregateBy is { Length: > 3 }
-                || options.AggregateBy?.Any(field => !TraceAnalyzeCriticalPathCommand.IsAggregationField(NormalizeField(field))) == true)
+            if (options is not TraceCompareCriticalPathOptions criticalPathOptions)
+            {
+                throw new InvalidOperationException("Critical-path comparison requires critical-path options.");
+            }
+            ValidateSelection(criticalPathOptions.TraceIds, options.Query, "current", validationResult);
+            ValidateSelection(criticalPathOptions.CompareTraceIds, options.CompareQuery, "comparison", validationResult);
+            if (criticalPathOptions.AggregateBy is { Length: > 3 }
+                || criticalPathOptions.AggregateBy?.Any(field => !TraceAnalyzeCriticalPathCommand.IsAggregationField(NormalizeField(field))) == true)
             {
                 Reject("--aggregate-by accepts at most 3 valid field names.");
             }
-            TraceAnalysisValidator.ValidateCriticalPathPercentiles(options.Percentiles, validationResult);
+            TraceAnalysisValidator.ValidateCriticalPathPercentiles(criticalPathOptions.Percentiles, validationResult);
         }
         else
         {
@@ -65,21 +70,20 @@ public abstract class BaseTraceCompareCommand(
             {
                 Reject("Supply --compare-query or both comparison timestamps.");
             }
-            if (options.TraceIds is not null || options.CompareTraceIds is not null || options.AggregateBy is not null
-                || options.Percentiles is not null || options.ResolveTraceLinks is not null || options.IncludeSamples is not null
-                || options.IncludeRollups is not null || options.ExcludeSubtreePrefixes is not null || options.DeprioritizeSubtreePrefixes is not null)
-            {
-                Reject("Trace IDs and critical-path settings are supported only by query analyze-compare-critical-path.");
-            }
         }
     }
 
     public override async Task<CommandResponse> ExecuteAsync(
-        CommandContext context, TraceCompareOptions options, CancellationToken cancellationToken)
+        CommandContext context, TOptions options, CancellationToken cancellationToken)
     {
         try
         {
-            bool criticalPath = analysis == "critical-path";
+            bool criticalPath = analysis == TraceComparisonAnalysis.CriticalPath;
+            TraceCompareCriticalPathOptions? criticalPathOptions = options as TraceCompareCriticalPathOptions;
+            if (criticalPath != (criticalPathOptions is not null))
+            {
+                throw new InvalidOperationException("Comparison options do not match the selected analysis.");
+            }
             var request = new TraceComparisonRequest
             {
                 Current = new()
@@ -87,26 +91,26 @@ public abstract class BaseTraceCompareCommand(
                     Query = options.Query,
                     Language = "KQL",
                     TimeRange = Window(options.StartTime, options.EndTime),
-                    TraceId = options.TraceIds is null ? null : string.Join(",", options.TraceIds.Select(id => id.Trim())),
+                    TraceId = criticalPathOptions?.TraceIds is null ? null : string.Join(",", criticalPathOptions.TraceIds.Select(id => id.Trim())),
                     Options = new()
                     {
                         MaxResults = options.MaxResults ?? 10000,
-                        ResolveTraceLinks = criticalPath ? options.ResolveTraceLinks ?? false : null,
-                        IncludeSamples = criticalPath ? options.IncludeSamples ?? true : null,
-                        IncludeRollups = criticalPath ? options.IncludeRollups ?? false : null,
-                        ExcludeSubtreePrefixes = options.ExcludeSubtreePrefixes,
-                        DeprioritizeSubtreePrefixes = options.DeprioritizeSubtreePrefixes,
+                        ResolveTraceLinks = criticalPath ? criticalPathOptions!.ResolveTraceLinks ?? false : null,
+                        IncludeSamples = criticalPath ? criticalPathOptions!.IncludeSamples ?? true : null,
+                        IncludeRollups = criticalPath ? criticalPathOptions!.IncludeRollups ?? false : null,
+                        ExcludeSubtreePrefixes = criticalPathOptions?.ExcludeSubtreePrefixes,
+                        DeprioritizeSubtreePrefixes = criticalPathOptions?.DeprioritizeSubtreePrefixes,
                     },
                 },
                 CompareTo = new()
                 {
                     Query = options.CompareQuery,
                     TimeRange = options.CompareStartTime is null ? null : Window(options.CompareStartTime, options.CompareEndTime!),
-                    TraceId = options.CompareTraceIds is null ? null : string.Join(",", options.CompareTraceIds.Select(id => id.Trim())),
+                    TraceId = criticalPathOptions?.CompareTraceIds is null ? null : string.Join(",", criticalPathOptions.CompareTraceIds.Select(id => id.Trim())),
                 },
             };
             string? aggregation = criticalPath
-                ? TraceAnalyzeCriticalPathCommand.BuildCriticalPathQuery(options.AggregateBy?.Select(NormalizeField).ToArray(), options.Percentiles)
+                ? TraceAnalyzeCriticalPathCommand.BuildCriticalPathQuery(criticalPathOptions!.AggregateBy?.Select(NormalizeField).ToArray(), criticalPathOptions.Percentiles)
                 : null;
             TraceQueryResult result = await service.ComparePopulationsAsync(
                 options.Subscription!, options.ResourceGroup, options.Workspace, analysis, request,
@@ -124,8 +128,8 @@ public abstract class BaseTraceCompareCommand(
 
     private static TraceQueryTimeRange Window(string start, string end) => new()
     {
-        StartTime = ParseTime(start).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", CultureInfo.InvariantCulture),
-        EndTime = ParseTime(end).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", CultureInfo.InvariantCulture),
+        StartTime = MonitorTracesService.FormatUtc(ParseTime(start)),
+        EndTime = MonitorTracesService.FormatUtc(ParseTime(end)),
     };
 
     private static DateTimeOffset ParseTime(string value) =>

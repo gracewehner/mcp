@@ -2,6 +2,8 @@
 // Licensed under the MIT License.
 
 using Azure.Mcp.Core.Services.Azure.Subscription;
+using Azure.Mcp.Tools.Monitor.Models.Traces;
+using Azure.Mcp.Tools.Monitor.Options.Traces;
 using Azure.Mcp.Tools.Monitor.Services.Traces;
 using Microsoft.Extensions.Logging;
 using Microsoft.Mcp.Core.Commands;
@@ -25,4 +27,4 @@ public sealed class TraceCompareAttributesCommand(
     ILogger<TraceCompareAttributesCommand> logger,
     IMonitorTracesService service,
     ISubscriptionResolver subscriptionResolver)
-    : BaseTraceCompareCommand(logger, service, subscriptionResolver, "attributes");
+    : BaseTraceCompareCommand<TraceCompareOptions>(logger, service, subscriptionResolver, TraceComparisonAnalysis.Attributes);

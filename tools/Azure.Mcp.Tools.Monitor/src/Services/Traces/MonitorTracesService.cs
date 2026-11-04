@@ -56,6 +56,7 @@ public sealed partial class MonitorTracesService(
     private const string CacheGroup = "monitor";
     private const string TraceEndpointCacheKey = "trace-endpoint";
     private static readonly TimeSpan EndpointCacheDuration = TimeSpan.FromMinutes(5);
+    private static readonly string UtcTimestampFormat = "yyyy-MM-ddTHH:mm:ss." + new string('F', 7) + "'Z'";
 
     /// <summary>Everything a data-plane call needs: resolved account, base URL, token and pipeline.</summary>
     private sealed record TraceSession(string AmwResourceId, string EndpointBase, string? AccountId, string Token, HttpPipeline Pipeline);
@@ -648,11 +649,11 @@ public sealed partial class MonitorTracesService(
         return delay < remaining ? delay : remaining;
     }
 
-    private static string FormatUtc(DateTimeOffset value)
+    internal static string FormatUtc(DateTimeOffset value)
     {
         // Preserve fractional seconds so compare's embedded selection stays inside the outer window.
         // The data plane requires a trailing 'Z', not DateTimeOffset's +00:00 offset.
-        return value.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ss.FFFFFFFZ", System.Globalization.CultureInfo.InvariantCulture); // cspell:ignore FFFFFFFZ
+        return value.UtcDateTime.ToString(UtcTimestampFormat, System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static string Truncate(string content, int max = 1024)

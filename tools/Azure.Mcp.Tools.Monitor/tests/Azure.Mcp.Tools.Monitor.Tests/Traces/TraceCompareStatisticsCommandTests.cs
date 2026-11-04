@@ -21,6 +21,7 @@ public sealed class TraceCompareStatisticsCommandTests()
     [Theory]
     [InlineData("--query Traces --compare-query Traces", true)]
     [InlineData("--query Traces --compare-start-time 2026-01-01T00:00:00Z --compare-end-time 2026-01-01T01:00:00Z", true)]
+    [InlineData("--compare-query Traces --compare-start-time 2026-01-01T00:00:00Z --compare-end-time 2026-01-01T01:00:00Z", false)]
     [InlineData("--query Traces", false)]
     [InlineData("--compare-query Traces", false)]
     [InlineData("--query Traces --compare-start-time 2026-01-01T00:00:00Z", false)]

@@ -27,9 +27,9 @@ public sealed partial class MonitorTracesService
     {
         string endpointPath = analysis switch
         {
-            "statistics" => CompareStatisticsEndpointPath,
-            "attributes" => CompareAttributesEndpointPath,
-            "critical-path" => CompareCriticalPathEndpointPath,
+            TraceComparisonAnalysis.Statistics => CompareStatisticsEndpointPath,
+            TraceComparisonAnalysis.Attributes => CompareAttributesEndpointPath,
+            TraceComparisonAnalysis.CriticalPath => CompareCriticalPathEndpointPath,
             _ => throw new ArgumentException("Unknown trace comparison operation.", nameof(analysis)),
         };
 
@@ -40,7 +40,7 @@ public sealed partial class MonitorTracesService
         request.TraceAccountId = session.AccountId is { Length: > 0 and <= 100 } accountId
             && !string.IsNullOrWhiteSpace(accountId) ? accountId
             : throw new InvalidOperationException("The workspace does not publish a valid accountId required for trace comparisons.");
-        if (analysis == "critical-path")
+        if (analysis == TraceComparisonAnalysis.CriticalPath)
         {
             request.Current.TraceId = await ResolveComparisonIdsAsync(
                 session, request.Current, request.Current.TimeRange!, cancellationToken);
