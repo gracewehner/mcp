@@ -42,9 +42,8 @@ public sealed class TraceAnalyzeTopAttributesCommand(
     public override void ValidateOptions(TraceAnalyzeTopAttributesOptions options, ValidationResult validationResult)
     {
         base.ValidateOptions(options, validationResult);
-        TraceAnalysisValidator.ValidateAnalysisWindow(options.OverallStartTime, options.OverallEndTime, validationResult);
-        TraceAnalysisValidator.ValidateAnalysisWindow(options.SelectionStartTime, options.SelectionEndTime, validationResult);
-        TraceAnalysisValidator.ValidateAnalysisMaxResults(options.MaxResults, 10000, validationResult);
+        TraceWindowValidator.ValidateWindow(options.OverallStartTime, options.OverallEndTime, validationResult);
+        TraceWindowValidator.ValidateWindow(options.SelectionStartTime, options.SelectionEndTime, validationResult);
         if (options.SelectionStartTime < options.OverallStartTime || options.SelectionEndTime > options.OverallEndTime)
         {
             validationResult.AddError("The selection window must be contained within the overall window.", "Invalid selection window.");
@@ -60,14 +59,6 @@ public sealed class TraceAnalyzeTopAttributesCommand(
         if (!IsLiteral(options.SelectionValue))
         {
             validationResult.AddError("--selection-value must be a finite number or a single-quoted string literal.", "Invalid selection-value.");
-        }
-        if (options.TopN is < 1 or > 100)
-        {
-            validationResult.AddError("--top-n must be between 1 and 100.", "Invalid top-n.");
-        }
-        if (options.OverallQuery is { Length: > 65536 })
-        {
-            validationResult.AddError("--overall-query must not exceed 65536 characters.", "Oversized overall-query.");
         }
     }
 
@@ -86,7 +77,7 @@ public sealed class TraceAnalyzeTopAttributesCommand(
                 $" | compare({options.SelectionField} {options.SelectionOp} {options.SelectionValue}, {options.TopN ?? 8}, {options.SelectionStartTime.UtcDateTime:O}, {options.SelectionEndTime.UtcDateTime:O})");
             var result = await tracesService.CompareAsync(
                 options.Subscription!, options.ResourceGroup, options.Workspace, query,
-                options.OverallStartTime, options.OverallEndTime, options.MaxResults ?? 10000,
+                options.OverallStartTime, options.OverallEndTime, Math.Clamp(options.MaxResults ?? 10000, 1, 10000),
                 options.Tenant, cancellationToken);
             context.Response.Results = ResponseResult.Create(
                 new TraceQueryCommandResult(result), MonitorJsonContext.Default.TraceQueryCommandResult);

@@ -23,6 +23,7 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
     [InlineData(true)]
     public async Task ExecuteAsync_BuildsAggregationAndForwardsSettings(bool custom)
     {
+        SubscriptionResolver.ResolveSubscription(null).Returns("sub");
         Service.CriticalPathAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<string[]>(), Arg.Any<TraceQueryOptionsBody>(),
@@ -32,7 +33,8 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
         var args = custom
             ? "--aggregate-by span.service.name span.name span.attributes.guid:x-request-id --percentiles 90 99 --exclude-subtree-prefixes sql. redis. --deprioritize-subtree-prefixes background. --resolve-trace-links true --include-samples false --include-rollups true --max-results 1000"
             : "";
-        var response = await ExecuteCommandAsync($"{Target} {Window} --trace-ids {Id} {args}");
+        var target = custom ? Target : "--resource-group rg --workspace amw";
+        var response = await ExecuteCommandAsync($"{target} {Window} --trace-ids {Id} {args}");
         var result = ValidateAndDeserializeResponse(response, MonitorJsonContext.Default.TraceQueryCommandResult);
 
         Assert.Equal("Running", result.Result.Status);
@@ -48,19 +50,16 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
                 && settings.ResolveTraceLinks == custom
                 && (!custom || (settings.ExcludeSubtreePrefixes!.SequenceEqual(new[] { "sql.", "redis." })
                     && settings.DeprioritizeSubtreePrefixes!.SequenceEqual(new[] { "background." })))),
-            "tenant", Arg.Any<CancellationToken>());
+            custom ? "tenant" : null, Arg.Any<CancellationToken>());
     }
 
     [Theory]
-    [InlineData("--trace-ids invalid")]
     [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --aggregate-by \"span.name'] | project trace_id\"")]
     [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --aggregate-by \"span.attributes.key'\"")]
     [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --aggregate-by \"span.attributes.key\\\"")]
-    [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --aggregate-by a b c d")]
     [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --percentiles 0")]
     [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --percentiles 100")]
-    [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --percentiles 1 2 3 4 5 6")]
-    [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --max-results 1001")]
+    [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --percentiles 101")]
     [InlineData("--trace-ids abcdef1234567890abcdef1234567890 --exclude-subtree-prefixes \" \"")]
     [InlineData("")]
     public async Task ExecuteAsync_RejectsInvalidArguments(string args)
@@ -71,20 +70,65 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
     }
 
     [Theory]
-    [InlineData(1000, true)]
-    [InlineData(1001, false)]
-    public async Task ExecuteAsync_EnforcesTraceIdCount(int count, bool valid)
+    [InlineData(0, 1)]
+    [InlineData(1, 1)]
+    [InlineData(1000, 1000)]
+    [InlineData(1001, 1000)]
+    public async Task ExecuteAsync_ClampsMaxResults(int requested, int expected)
     {
         Service.CriticalPathAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<string[]>(), Arg.Any<TraceQueryOptionsBody>(),
             Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "op-critical" });
 
-        var response = await ExecuteCommandAsync($"{Target} {Window} --trace-ids {string.Join(" ", Enumerable.Repeat(Id, count))}");
-        Assert.Equal(valid ? HttpStatusCode.OK : HttpStatusCode.BadRequest, response.Status);
-        if (!valid)
-        {
-            Assert.Empty(Service.ReceivedCalls());
-        }
+        var response = await ExecuteCommandAsync($"{Target} {Window} --trace-ids {Id} --max-results {requested}");
+
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        await Service.Received(1).CriticalPathAsync(
+            "sub", "rg", "amw", Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(),
+            Arg.Any<string[]>(), Arg.Is<TraceQueryOptionsBody>(body => body.MaxResults == expected),
+            "tenant", Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ForwardsBackendValidatedInputs()
+    {
+        Service.CriticalPathAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<string[]>(), Arg.Any<TraceQueryOptionsBody>(),
+            Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "op-critical" });
+
+        var response = await ExecuteCommandAsync($"{Target} {Window} --trace-ids invalid --aggregate-by a b c d --percentiles 1 2 3 4 5 6");
+
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        await Service.Received(1).CriticalPathAsync(
+            "sub", "rg", "amw",
+            Arg.Is<string>(query => query.Contains("p6=percentile(duration_nano, 6)", StringComparison.Ordinal)
+                && query.EndsWith("['a'], ['b'], ['c'], ['d']", StringComparison.Ordinal)),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(),
+            Arg.Is<string[]>(ids => ids.SequenceEqual(new[] { "invalid" })), Arg.Any<TraceQueryOptionsBody>(),
+            "tenant", Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [InlineData("--resource-group rg --workspace amw")]
+    [InlineData("--subscription sub --workspace amw")]
+    [InlineData("--subscription sub --resource-group rg")]
+    public async Task ExecuteAsync_RejectsMissingResourceContext(string target)
+    {
+        var response = await ExecuteCommandAsync($"{target} {Window} --trace-ids {Id}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.Status);
+        Assert.Empty(Service.ReceivedCalls());
+    }
+
+    [Theory]
+    [InlineData("2026-10-12T00:00:00Z", "2026-10-12T00:00:00Z")]
+    [InlineData("2026-10-10T00:00:00Z", "2026-10-12T00:00:00Z")]
+    [InlineData("invalid", "2026-10-12T00:00:00Z")]
+    public async Task ExecuteAsync_RejectsInvalidWindow(string start, string end)
+    {
+        var response = await ExecuteCommandAsync($"{Target} --start-time {start} --end-time {end} --trace-ids {Id}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.Status);
+        Assert.Empty(Service.ReceivedCalls());
     }
 }

@@ -3,7 +3,6 @@
 
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Azure.Mcp.Tools.Monitor.Commands;
 
 namespace Azure.Mcp.Tools.Monitor.Models.Traces;
 
@@ -40,17 +39,6 @@ internal sealed class TraceQueryPage()
                  property.Value.ValueKind == JsonValueKind.True && current.ValueKind == JsonValueKind.False))
             {
                 Properties[property.Key] = property.Value;
-            }
-            else if (property.Key == "metadata" && property.Value.ValueKind == JsonValueKind.Object
-                && current.ValueKind == JsonValueKind.Object)
-            {
-                // Later pages can omit an earlier page's truncation warning.
-                var metadata = current.EnumerateObject().ToDictionary(item => item.Name, item => item.Value);
-                foreach (var item in property.Value.EnumerateObject())
-                {
-                    metadata.TryAdd(item.Name, item.Value);
-                }
-                Properties[property.Key] = JsonSerializer.SerializeToElement(metadata, MonitorJsonContext.Default.DictionaryStringJsonElement);
             }
         }
     }

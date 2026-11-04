@@ -41,19 +41,12 @@ public sealed class TraceAnalyzeCriticalPathCommand(
     public override void ValidateOptions(TraceAnalyzeCriticalPathOptions options, ValidationResult validationResult)
     {
         base.ValidateOptions(options, validationResult);
-        TraceAnalysisValidator.ValidateAnalysisWindow(options.StartTime, options.EndTime, validationResult);
-        TraceAnalysisValidator.ValidateAnalysisMaxResults(options.MaxResults, 1000, validationResult);
-        if (options.TraceIds is not { Length: >= 1 and <= 1000 } ||
-            options.TraceIds.Any(id => !Guid.TryParseExact(id, "N", out _) && !Guid.TryParseExact(id, "D", out _)))
+        TraceWindowValidator.ValidateWindow(options.StartTime, options.EndTime, validationResult);
+        if (options.AggregateBy?.Any(dimension => !IsAggregationField(dimension)) == true)
         {
-            validationResult.AddError("--trace-ids requires 1-1000 IDs, each 32 hexadecimal characters or a GUID.", "Invalid trace-ids.");
+            validationResult.AddError("--aggregate-by accepts span field or custom attribute names without brackets or quotes.", "Invalid aggregate-by.");
         }
-        if (options.AggregateBy is { Length: > 3 } ||
-            options.AggregateBy?.Any(dimension => !IsAggregationField(dimension)) == true)
-        {
-            validationResult.AddError("--aggregate-by accepts at most 3 span field or custom attribute names without brackets or quotes.", "Invalid aggregate-by.");
-        }
-        TraceAnalysisValidator.ValidateCriticalPathPercentiles(options.Percentiles, validationResult);
+        ValidateCriticalPathPercentiles(options.Percentiles, validationResult);
         if (options.ExcludeSubtreePrefixes?.Any(string.IsNullOrWhiteSpace) == true ||
             options.DeprioritizeSubtreePrefixes?.Any(string.IsNullOrWhiteSpace) == true)
         {
@@ -69,7 +62,7 @@ public sealed class TraceAnalyzeCriticalPathCommand(
             var query = BuildCriticalPathQuery(options.AggregateBy, options.Percentiles);
             var body = new TraceQueryOptionsBody
             {
-                MaxResults = options.MaxResults ?? 10,
+                MaxResults = Math.Clamp(options.MaxResults ?? 10, 1, 1000),
                 ResolveTraceLinks = options.ResolveTraceLinks ?? false,
                 IncludeSamples = options.IncludeSamples ?? true,
                 IncludeRollups = options.IncludeRollups ?? false,
@@ -89,6 +82,14 @@ public sealed class TraceAnalyzeCriticalPathCommand(
             HandleException(context, ex);
         }
         return context.Response;
+    }
+
+    internal static void ValidateCriticalPathPercentiles(int[]? percentiles, ValidationResult result)
+    {
+        if (percentiles?.Any(p => p is < 1 or > 99) == true)
+        {
+            result.AddError("--percentiles values must be between 1 and 99.", "Invalid percentiles.");
+        }
     }
 
     internal static string BuildCriticalPathQuery(string[]? aggregateBy, int[]? percentiles)

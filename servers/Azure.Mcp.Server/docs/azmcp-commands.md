@@ -4064,6 +4064,8 @@ Resuming does not change the query or its submitted time range and row limit.
 Queries collect subsequent result pages for up to 180 seconds and return the results collected so far.
 If the status is `Running`, use `query resume` with the returned operation ID.
 Requested row limits are approximate; responses preserve truncation and partial-result indicators.
+For critical-path analysis, `--max-results` defaults to 10 and is clamped to 1-1000 requested rows.
+For top-attributes analysis, it defaults to 10000 and is clamped to 1-10000 sampled traces.
 Consolidated mode exposes resume as `resume_azure_monitor_trace_query` because each call advances the results.
 
 ```bash

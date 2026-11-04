@@ -13,7 +13,7 @@ internal sealed class MonitorTracesTestHandler(
     string endpoint = "https://amw.data.monitor.azure.com",
     string cancelBody = """{"status":"Cancelled"}""",
     IEnumerable<HttpResponseMessage>? resultPages = null,
-    string submitBody = """{"operationId":"op-1234"}""") : HttpMessageHandler
+    HttpResponseMessage? submitResponse = null) : HttpMessageHandler
 {
     private readonly Queue<HttpResponseMessage> _resultPages = new(resultPages ?? []);
     internal const string Subscription = "00000000-0000-0000-0000-000000000001";
@@ -41,7 +41,7 @@ internal sealed class MonitorTracesTestHandler(
                 SubmitCalls++;
                 LastSubmitUri = request.RequestUri;
                 LastSubmitBody = await request.Content!.ReadAsStringAsync(cancellationToken);
-                return new(HttpStatusCode.Accepted) { Content = new StringContent(submitBody) };
+                return submitResponse ?? new(HttpStatusCode.Accepted) { Content = new StringContent("""{"operationId":"op-1234"}""") };
             }
 
             if (request.RequestUri.AbsolutePath.EndsWith("/results", StringComparison.Ordinal))

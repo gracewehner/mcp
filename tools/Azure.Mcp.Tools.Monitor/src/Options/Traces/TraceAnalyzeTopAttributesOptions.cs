@@ -44,9 +44,9 @@ public sealed class TraceAnalyzeTopAttributesOptions : ISubscriptionOption
     [Option(Description = "Selection value as a finite number or single-quoted string literal, for example 1000 or 'fail'.")]
     public required string SelectionValue { get; set; }
 
-    [Option(Description = "Top distinguishing values per attribute. Default 8; range 1-100.")]
+    [Option(Description = "Top distinguishing values per attribute. Default 8; range 1-1000.")]
     public int? TopN { get; set; }
 
-    [Option(Description = "Maximum number of traces requested for the backend comparison sample. Default 10000; range 1-10000. Smaller samples can change the ranking; top-n limits values per attribute, not traces.")]
+    [Option(Description = "Maximum number of traces requested for the backend comparison sample. Default 10000; clamped to 1-10000. Smaller samples can change the ranking; top-n limits values per attribute, not traces.")]
     public int? MaxResults { get; set; }
 }

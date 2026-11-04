@@ -1,17 +1,21 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.CommandLine;
 using System.Net;
 using System.Security;
 using System.Text.Json;
 using Azure.Core;
 using Azure.Mcp.Core.Services.Azure;
+using Azure.Mcp.Core.Services.Azure.Subscription;
 using Azure.Mcp.Tests.Helpers;
+using Azure.Mcp.Tools.Monitor.Commands.Traces;
 using Azure.Mcp.Tools.Monitor.Models.Traces;
 using Azure.Mcp.Tools.Monitor.Services.Traces;
 using Azure.ResourceManager.Models;
 using Azure.ResourceManager.Resources;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Mcp.Core.Commands;
 using Microsoft.Mcp.Core.Services.Caching;
 using Microsoft.Mcp.Core.Services.Time;
 using NSubstitute;
@@ -23,40 +27,28 @@ public sealed class MonitorTracesServiceTests()
 {
     private const string ResourceGroup = "rg";
 
-    [Theory]
-    [InlineData("", "empty")]
-    [InlineData("  ", "empty")]
-    [InlineData("{", "malformed JSON")]
-    [InlineData("[]", "operationId")]
-    [InlineData("null", "operationId")]
-    [InlineData("{}", "operationId")]
-    [InlineData("""{"operationId":42}""", "operationId")]
-    [InlineData("""{"operationId":""}""", "operationId")]
-    [InlineData("""{"operationId":" "}""", "operationId")]
-    public async Task Submissions_RejectInvalidResponseBeforePolling(string body, string message)
+    [Fact]
+    public async Task CriticalPath_BackendBadRequestReachesCaller()
     {
-        var end = DateTimeOffset.UtcNow;
-        foreach (var operation in new[] { "query", "compare", "critical-path" })
+        using var submitResponse = new HttpResponseMessage(HttpStatusCode.BadRequest)
         {
-            using var handler = new MonitorTracesTestHandler(1, false, submitBody: body);
-            var (service, _) = CreateService(handler);
-            var exception = await Assert.ThrowsAsync<HttpRequestException>(() => operation switch
-            {
-                "compare" => service.CompareAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
-                    "Traces", end.AddMinutes(-1), end, 10, cancellationToken: TestContext.Current.CancellationToken),
-                "critical-path" => service.CriticalPathAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
-                    "Traces", end.AddMinutes(-1), end, ["0123456789abcdef0123456789abcdef"],
-                    new TraceQueryOptionsBody { MaxResults = 10 },
-                    cancellationToken: TestContext.Current.CancellationToken),
-                _ => service.RunQueryAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
-                    "Traces", end.AddMinutes(-1), end, 10, false, cancellationToken: TestContext.Current.CancellationToken),
-            });
+            Content = new StringContent("""{"error":{"code":"InvalidQuery","message":"Invalid trace ID format"}}""")
+        };
+        using var handler = new MonitorTracesTestHandler(1, false,
+            submitResponse: submitResponse);
+        var (service, _) = CreateService(handler);
+        var command = new TraceAnalyzeCriticalPathCommand(
+            NullLogger<TraceAnalyzeCriticalPathCommand>.Instance, service, new SubscriptionResolver());
+        var args = $"--subscription {MonitorTracesTestHandler.Subscription} --resource-group rg --workspace amw0 "
+            + "--trace-ids invalid --start-time 2026-10-12T00:00:00Z --end-time 2026-10-12T01:00:00Z";
 
-            Assert.Equal(HttpStatusCode.BadGateway, exception.StatusCode);
-            Assert.Contains(message, exception.Message, StringComparison.Ordinal);
-            Assert.Equal(1, handler.SubmitCalls);
-            Assert.Equal(0, handler.PollCalls);
-        }
+        var response = await ((IBaseCommand)command).ExecuteAsync(
+            new(), command.GetCommand().Parse(args), TestContext.Current.CancellationToken);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.Status);
+        Assert.Contains("Invalid trace ID format", response.Message);
+        Assert.Contains("\"traceId\":\"invalid\"", handler.LastSubmitBody);
+        Assert.Equal(0, handler.PollCalls);
     }
 
     [Fact]
@@ -90,7 +82,7 @@ public sealed class MonitorTracesServiceTests()
     {
         using var page = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent("""{"value":[]}""")
+            Content = new StringContent("""{"value":[{"id":1},{"id":2}]}""")
         };
         using var handler = new MonitorTracesTestHandler(1, false, resultPages: [page]);
         var (service, _) = CreateService(handler);
@@ -102,7 +94,7 @@ public sealed class MonitorTracesServiceTests()
                 ["abcdef1234567890abcdef1234567890", "01234567-89ab-cdef-0123-456789abcdef"],
                 new TraceQueryOptionsBody
                 {
-                    MaxResults = 1000,
+                    MaxResults = 1,
                     ResolveTraceLinks = true,
                     IncludeSamples = false,
                     IncludeRollups = true,
@@ -118,8 +110,8 @@ public sealed class MonitorTracesServiceTests()
         Assert.Equal("2026-10-12T00:00:00.3456789Z", root.GetProperty("timeRange").GetProperty("startTime").GetString());
         Assert.Equal("2026-10-12T01:00:00.3456789Z", root.GetProperty("timeRange").GetProperty("endTime").GetString());
         var options = root.GetProperty("options");
-        Assert.Equal(criticalPath ? 1000 : 10000, options.GetProperty("maxResults").GetInt32());
-        Assert.Contains("top=1000&", handler.LastDataPlaneUri!.Query);
+        Assert.Equal(criticalPath ? 1 : 10000, options.GetProperty("maxResults").GetInt32());
+        Assert.Contains(criticalPath ? "top=1&" : "top=1000&", handler.LastDataPlaneUri!.Query);
         if (criticalPath)
         {
             Assert.Equal("abcdef1234567890abcdef1234567890,01234567-89ab-cdef-0123-456789abcdef", root.GetProperty("traceId").GetString());
@@ -135,6 +127,7 @@ public sealed class MonitorTracesServiceTests()
             Assert.False(options.TryGetProperty("resolveTraceLinks", out _));
         }
         Assert.Equal("Succeeded", result.Status);
+        Assert.Equal(2, result.Payload!.Value.GetProperty("value").GetArrayLength());
 
         var resumed = await service.ResumeQueryAsync(
             MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0", result.OperationId!,
@@ -273,11 +266,11 @@ public sealed class MonitorTracesServiceTests()
         const string query = "Traces | where trace_id == '\"quoted\"'";
 
         await service.RunQueryAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0", query,
-            end.AddMinutes(-30), end, 1000, true, cancellationToken: TestContext.Current.CancellationToken);
+            end.AddMinutes(-30), end, 1234, true, cancellationToken: TestContext.Current.CancellationToken);
         using JsonDocument submit = JsonDocument.Parse(handler.LastSubmitBody!);
         Assert.Equal(query, submit.RootElement.GetProperty("query").GetString());
-        Assert.Equal(1000, submit.RootElement.GetProperty("options").GetProperty("maxResults").GetInt32());
-        Assert.Contains("top=1000&", handler.LastDataPlaneUri!.Query);
+        Assert.Equal(1234, submit.RootElement.GetProperty("options").GetProperty("maxResults").GetInt32());
+        Assert.Contains("top=1234&", handler.LastDataPlaneUri!.Query);
 
         await service.ResumeQueryAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0", "op-1234",
             10, false,
@@ -532,16 +525,11 @@ public sealed class MonitorTracesServiceTests()
     {
         using var first = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent($$$"""
-                {"value":[1],"nextLink":"/ignored","{{{flag}}}":true,
-                 "metadata":{"SpansTruncatedTraceCount":"2","RowsFound":"1"}}
-                """)
+            Content = new StringContent($"{{\"value\":[1],\"nextLink\":\"/ignored\",\"{flag}\":true}}")
         };
         using var last = new HttpResponseMessage(HttpStatusCode.OK)
         {
-            Content = new StringContent($$$"""
-                {"value":[2],"{{{flag}}}":false,"metadata":{"RowsFound":"2"}}
-                """)
+            Content = new StringContent($"{{\"value\":[2],\"{flag}\":false}}")
         };
         using var handler = new MonitorTracesTestHandler(1, false, resultPages: [first, last]);
         (MonitorTracesService service, IAzureService _) = CreateService(handler);
@@ -551,11 +539,7 @@ public sealed class MonitorTracesServiceTests()
             cancellationToken: TestContext.Current.CancellationToken);
 
         Assert.Equal("Succeeded", result.Status);
-        var payload = result.Payload!.Value;
-        Assert.True(payload.GetProperty(flag).GetBoolean());
-        var metadata = payload.GetProperty("metadata");
-        Assert.Equal("2", metadata.GetProperty("SpansTruncatedTraceCount").GetString());
-        Assert.Equal("2", metadata.GetProperty("RowsFound").GetString());
+        Assert.True(result.Payload!.Value.GetProperty(flag).GetBoolean());
         Assert.Equal(2, result.Payload.Value.GetProperty("value").GetArrayLength());
     }
 

@@ -50,6 +50,6 @@ public sealed class TraceAnalyzeCriticalPathOptions : ISubscriptionOption
     [Option(Description = "Include per-trace critical-path totals in the backend metadata. Default false.")]
     public bool? IncludeRollups { get; set; }
 
-    [Option(Description = "Total backend result-row limit. Default 10; range 1-1000. Lower limits may omit aggregate buckets.")]
+    [Option(Description = "Requested result-row limit. Default 10; clamped to 1-1000. Whole result pages may exceed it.")]
     public int? MaxResults { get; set; }
 }

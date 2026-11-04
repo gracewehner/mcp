@@ -251,12 +251,12 @@ public sealed class MonitorTracesService(
         var session = await OpenSessionAsync(subscription, resourceGroup, workspace, tenant, cancellationToken).ConfigureAwait(false);
 
         string operationId = await SendSubmitAsync(
-            session, query, startTime, endTime, options, endpointPath, traceId, cancellationToken);
+            session, query, startTime, endTime, options, endpointPath, traceId, cancellationToken).ConfigureAwait(false);
 
         // Compare samples traces, but returns attribute rows: a lower sample must not stop result paging.
         var maxRows = endpointPath == CompareEndpointPath ? MaxResumeRows : options.MaxResults;
         return await PollForResultsAsync(
-            session, operationId, Math.Min(maxRows, 1000), maxRows, includeSpans, cancellationToken);
+            session, operationId, maxRows, maxRows, includeSpans, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<TraceQueryResult> ResumeQueryAsync(
@@ -463,10 +463,10 @@ public sealed class MonitorTracesService(
             Options = options,
         };
 
-        using var content = RequestContent.Create(
+        var content = RequestContent.Create(
             JsonSerializer.SerializeToUtf8Bytes(body, MonitorJsonContext.Default.TraceQueryRequest));
 
-        using var response = await SendDataPlaneAsync(session, RequestMethod.Post, submitUrl, content, cancellationToken);
+        using var response = await SendDataPlaneAsync(session, RequestMethod.Post, submitUrl, content, cancellationToken).ConfigureAwait(false);
         var payload = response.Content.ToString();
 
         if (response.Status != 202)
@@ -474,25 +474,13 @@ public sealed class MonitorTracesService(
             throw DataPlaneFailure("query submit", response);
         }
 
-        if (string.IsNullOrWhiteSpace(payload))
+        using var doc = JsonDocument.Parse(payload);
+        if (!doc.RootElement.TryGetProperty("operationId", out var opId) || opId.ValueKind != JsonValueKind.String)
         {
-            throw new HttpRequestException("Trace submit response is empty.", null, System.Net.HttpStatusCode.BadGateway);
+            throw new InvalidOperationException($"Trace query submit response missing operationId: {Truncate(payload)}");
         }
-        try
-        {
-            using var doc = JsonDocument.Parse(payload);
-            if (doc.RootElement.ValueKind != JsonValueKind.Object
-                || !doc.RootElement.TryGetProperty("operationId", out var opId)
-                || opId.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(opId.GetString()))
-            {
-                throw new HttpRequestException("Trace submit response is missing operationId.", null, System.Net.HttpStatusCode.BadGateway);
-            }
-            return opId.GetString()!;
-        }
-        catch (JsonException ex)
-        {
-            throw new HttpRequestException("Trace submit returned malformed JSON.", ex, System.Net.HttpStatusCode.BadGateway);
-        }
+
+        return opId.GetString()!;
     }
 
     private async Task<TraceQueryResult> PollForResultsAsync(

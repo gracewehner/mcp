@@ -26,17 +26,19 @@ public sealed class TraceAnalyzeTopAttributesCommandTests : SubscriptionCommandU
     }
 
     [Theory]
-    [InlineData(1)]
-    [InlineData(1000)]
-    [InlineData(10000)]
-    public async Task ExecuteAsync_ForwardsComparisonAndTraceSampleWithoutClamping(int maxResults)
+    [InlineData(0, 1)]
+    [InlineData(1, 1)]
+    [InlineData(1000, 1000)]
+    [InlineData(10000, 10000)]
+    [InlineData(10001, 10000)]
+    public async Task ExecuteAsync_ClampsAndForwardsTraceSample(int requested, int expected)
     {
         Service.CompareAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
             Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<string?>(),
             Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Running", OperationId = "op-compare" });
 
-        var response = await ExecuteCommandAsync($"{Target} {Window} {Selection} --max-results {maxResults}");
+        var response = await ExecuteCommandAsync($"{Target} {Window} {Selection} --max-results {requested}");
         var result = ValidateAndDeserializeResponse(response, MonitorJsonContext.Default.TraceQueryCommandResult);
 
         Assert.Equal("Running", result.Result.Status);
@@ -44,7 +46,7 @@ public sealed class TraceAnalyzeTopAttributesCommandTests : SubscriptionCommandU
         await Service.Received(1).CompareAsync("sub", "rg", "amw",
             "Traces | compare(span_count > 10, 8, 2026-10-12T00:30:00.0000000Z, 2026-10-12T01:00:00.0000000Z)",
             Arg.Is<DateTimeOffset>(time => time.Hour == 0),
-            Arg.Is<DateTimeOffset>(time => time.Hour == 1), maxResults, "tenant", Arg.Any<CancellationToken>());
+            Arg.Is<DateTimeOffset>(time => time.Hour == 1), expected, "tenant", Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -64,16 +66,22 @@ public sealed class TraceAnalyzeTopAttributesCommandTests : SubscriptionCommandU
             Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), 10000, "tenant", Arg.Any<CancellationToken>());
     }
 
-    [Theory]
-    [InlineData("--max-results 0")]
-    [InlineData("--max-results 10001")]
-    [InlineData("--top-n 0")]
-    [InlineData("--top-n 101")]
-    public async Task ExecuteAsync_RejectsOutOfRangeLimits(string extra)
+    [Fact]
+    public async Task ExecuteAsync_ForwardsBackendValidatedTopNAndQuery()
     {
-        var response = await ExecuteCommandAsync($"{Target} {Window} {Selection} {extra}");
-        Assert.Equal(HttpStatusCode.BadRequest, response.Status);
-        Assert.Empty(Service.ReceivedCalls());
+        Service.CompareAsync(
+            Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<string?>(),
+            Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "op-compare" });
+        var query = "Traces | where span_count > 0" + new string(' ', 65536) + "| project trace_id";
+
+        var response = await ExecuteCommandAsync($"{Target} {Window} {Selection} --overall-query \"{query}\" --top-n 101");
+
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        await Service.Received(1).CompareAsync("sub", "rg", "amw",
+            Arg.Is<string>(value => value.StartsWith(query, StringComparison.Ordinal)
+                && value.Contains("compare(span_count > 10, 101,", StringComparison.Ordinal)),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), 10000, "tenant", Arg.Any<CancellationToken>());
     }
 
     [Theory]
@@ -99,6 +107,22 @@ public sealed class TraceAnalyzeTopAttributesCommandTests : SubscriptionCommandU
     public async Task ExecuteAsync_RejectsInvalidOrMissingWindows(string window)
     {
         var response = await ExecuteCommandAsync($"{Target} {window} {Selection}");
+        Assert.Equal(HttpStatusCode.BadRequest, response.Status);
+        Assert.Empty(Service.ReceivedCalls());
+    }
+
+    [Theory]
+    [InlineData("--overall-start-time 2026-10-12T00:00:00Z")]
+    [InlineData("--overall-end-time 2026-10-12T01:00:00Z")]
+    [InlineData("--selection-start-time 2026-10-12T00:30:00Z")]
+    [InlineData("--selection-end-time 2026-10-12T01:00:00Z")]
+    [InlineData("--selection-field span_count")]
+    [InlineData("--selection-op >")]
+    [InlineData("--selection-value 10")]
+    public async Task ExecuteAsync_RejectsMissingRequiredAnalysisInput(string omitted)
+    {
+        var args = $"{Target} {Window} {Selection}".Replace(omitted, "", StringComparison.Ordinal);
+        var response = await ExecuteCommandAsync(args);
         Assert.Equal(HttpStatusCode.BadRequest, response.Status);
         Assert.Empty(Service.ReceivedCalls());
     }
