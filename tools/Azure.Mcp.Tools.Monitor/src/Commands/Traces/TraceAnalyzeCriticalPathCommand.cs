@@ -66,7 +66,7 @@ public sealed class TraceAnalyzeCriticalPathCommand(
     {
         try
         {
-            var query = TraceCriticalPathQueryBuilder.Build(options.AggregateBy, options.Percentiles);
+            var query = BuildCriticalPathQuery(options.AggregateBy, options.Percentiles);
             var settings = new TraceCriticalPathSettings
             {
                 TraceIds = options.TraceIds,
@@ -89,6 +89,14 @@ public sealed class TraceAnalyzeCriticalPathCommand(
             HandleException(context, ex);
         }
         return context.Response;
+    }
+
+    internal static string BuildCriticalPathQuery(string[]? aggregateBy, int[]? percentiles)
+    {
+        var dimensions = aggregateBy is { Length: > 0 } ? aggregateBy : ["span.name"];
+        var values = percentiles is { Length: > 0 } ? percentiles : [50, 95, 99];
+        var clauses = values.Select(p => FormattableString.Invariant($"p{p}=percentile(duration_nano, {p})"));
+        return $"Traces | summarize {string.Join(", ", clauses)} by {string.Join(", ", dimensions.Select(d => $"['{d}']"))}";
     }
 
     private static bool IsAggregationField(string? value) =>
