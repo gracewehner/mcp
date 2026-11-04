@@ -106,7 +106,7 @@ public abstract class BaseTraceCompareCommand(
                 },
             };
             string? aggregation = criticalPath
-                ? TraceCriticalPathQueryBuilder.Build(options.AggregateBy?.Select(NormalizeField).ToArray(), options.Percentiles)
+                ? TraceAnalyzeCriticalPathCommand.BuildCriticalPathQuery(options.AggregateBy?.Select(NormalizeField).ToArray(), options.Percentiles)
                 : null;
             TraceQueryResult result = await service.ComparePopulationsAsync(
                 options.Subscription!, options.ResourceGroup, options.Workspace, analysis, request,
