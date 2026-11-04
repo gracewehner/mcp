@@ -53,10 +53,7 @@ public sealed class TraceAnalyzeCriticalPathCommand(
         {
             validationResult.AddError("--aggregate-by accepts at most 3 span field or custom attribute names without brackets or quotes.", "Invalid aggregate-by.");
         }
-        if (options.Percentiles is { Length: > 5 } || options.Percentiles?.Any(p => p is < 1 or > 99) == true)
-        {
-            validationResult.AddError("--percentiles accepts at most 5 values, each between 1 and 99.", "Invalid percentiles.");
-        }
+        TraceAnalysisValidator.ValidateCriticalPathPercentiles(options.Percentiles, validationResult);
         if (options.ExcludeSubtreePrefixes?.Any(string.IsNullOrWhiteSpace) == true ||
             options.DeprioritizeSubtreePrefixes?.Any(string.IsNullOrWhiteSpace) == true)
         {
@@ -69,10 +66,7 @@ public sealed class TraceAnalyzeCriticalPathCommand(
     {
         try
         {
-            var dimensions = options.AggregateBy is { Length: > 0 } ? options.AggregateBy : ["span.name"];
-            var percentiles = options.Percentiles is { Length: > 0 } ? options.Percentiles : [50, 95, 99];
-            var clauses = percentiles.Select(p => FormattableString.Invariant($"p{p}=percentile(duration_nano, {p})"));
-            var query = $"Traces | summarize {string.Join(", ", clauses)} by {string.Join(", ", dimensions.Select(d => $"['{d}']"))}";
+            var query = TraceCriticalPathQueryBuilder.Build(options.AggregateBy, options.Percentiles);
             var settings = new TraceCriticalPathSettings
             {
                 TraceIds = options.TraceIds,
