@@ -7,10 +7,10 @@ using Microsoft.Mcp.Core.Options;
 namespace Azure.Mcp.Tools.Monitor.Options.Traces;
 
 public sealed class TraceCompareOptions()
-    : ISubscriptionOption
+    : ITraceCompareOptions
 {
-    [Option(Description = "Current population KQL, required for statistics and attributes. For statistics, use matching named aggregations and grouping keys in both queries. For critical-path, supply a filters-only Traces query or --trace-ids, not both.")]
-    public string? Query { get; set; }
+    [Option(Description = "Required current population KQL. For statistics, use matching named aggregations and grouping keys in both queries.")]
+    public required string Query { get; set; }
 
     [Option(Description = "Current population start time, UTC ISO 8601. Each population window must be positive and no longer than one day.")]
     public required string StartTime { get; set; }
@@ -29,33 +29,6 @@ public sealed class TraceCompareOptions()
 
     [Option(Description = "Trace sample size per population. Default 10000; range 1..10000. This is not the number of returned comparison rows.")]
     public int? MaxResults { get; set; }
-
-    [Option(Description = "Critical-path only: 1..1000 explicit current trace IDs (32 hexadecimal characters or GUIDs), instead of --query.")]
-    public string[]? TraceIds { get; set; }
-
-    [Option(Description = "Critical-path only: 1..1000 explicit comparison trace IDs, instead of --compare-query.")]
-    public string[]? CompareTraceIds { get; set; }
-
-    [Option(Description = "Critical-path only: grouping fields. Default span.name; maximum 3. Accepts bare or bracket-quoted field names.")]
-    public string[]? AggregateBy { get; set; }
-
-    [Option(Description = "Critical-path only: up to 5 percentiles, each 1..99. Default 50, 95, 99.")]
-    public int[]? Percentiles { get; set; }
-
-    [Option(Description = "Critical-path only: resolve linked traces. Default false.")]
-    public bool? ResolveTraceLinks { get; set; }
-
-    [Option(Description = "Critical-path only: include sample trace IDs per aggregation row. Default true.")]
-    public bool? IncludeSamples { get; set; }
-
-    [Option(Description = "Critical-path only: include roll-up rows. Default false.")]
-    public bool? IncludeRollups { get; set; }
-
-    [Option(Description = "Critical-path only: span-name prefixes excluded with their subtrees.")]
-    public string[]? ExcludeSubtreePrefixes { get; set; }
-
-    [Option(Description = "Critical-path only: span-name prefixes given lower priority when concurrent work exists.")]
-    public string[]? DeprioritizeSubtreePrefixes { get; set; }
 
     [Option(Description = "The Azure Monitor Workspace resource name enabled for Trace Store.")]
     public required string Workspace { get; set; }

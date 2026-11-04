@@ -26,7 +26,7 @@ public sealed class TraceCompareCriticalPathCommandTests()
         var command = new TraceCompareCriticalPathCommand(
             NullLogger<TraceCompareCriticalPathCommand>.Instance, Service, SubscriptionResolver);
         var validation = new ValidationResult();
-        command.ValidateOptions(new TraceCompareOptions
+        command.ValidateOptions(new TraceCompareCriticalPathOptions
         {
             Subscription = "sub",
             Workspace = "amw",
