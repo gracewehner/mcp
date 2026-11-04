@@ -42,8 +42,8 @@ public sealed class TraceAnalyzeTopAttributesCommand(
     public override void ValidateOptions(TraceAnalyzeTopAttributesOptions options, ValidationResult validationResult)
     {
         base.ValidateOptions(options, validationResult);
-        TraceWindowValidator.ValidateWindow(options.OverallStartTime, options.OverallEndTime, validationResult);
-        TraceWindowValidator.ValidateWindow(options.SelectionStartTime, options.SelectionEndTime, validationResult);
+        TraceQueryValidator.ValidateWindow(options.OverallStartTime, options.OverallEndTime, validationResult);
+        TraceQueryValidator.ValidateWindow(options.SelectionStartTime, options.SelectionEndTime, validationResult);
         if (options.SelectionStartTime < options.OverallStartTime || options.SelectionEndTime > options.OverallEndTime)
         {
             validationResult.AddError("The selection window must be contained within the overall window.", "Invalid selection window.");

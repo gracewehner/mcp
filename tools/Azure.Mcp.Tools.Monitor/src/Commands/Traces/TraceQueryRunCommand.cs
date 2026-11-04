@@ -59,7 +59,7 @@ public sealed class TraceQueryRunCommand(
         {
             DateTimeOffset endTime = ParseUtc(options.EndTime) ?? DateTimeOffset.UtcNow;
             DateTimeOffset startTime = ParseUtc(options.StartTime) ?? endTime - DefaultTimeRange;
-            TraceWindowValidator.ValidateWindow(startTime, endTime, validationResult);
+            TraceQueryValidator.ValidateWindow(startTime, endTime, validationResult);
         }
     }
 

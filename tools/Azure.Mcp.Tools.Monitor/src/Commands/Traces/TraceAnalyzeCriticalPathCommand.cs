@@ -41,7 +41,7 @@ public sealed class TraceAnalyzeCriticalPathCommand(
     public override void ValidateOptions(TraceAnalyzeCriticalPathOptions options, ValidationResult validationResult)
     {
         base.ValidateOptions(options, validationResult);
-        TraceWindowValidator.ValidateWindow(options.StartTime, options.EndTime, validationResult);
+        TraceQueryValidator.ValidateWindow(options.StartTime, options.EndTime, validationResult);
         if (options.AggregateBy?.Any(dimension => !IsAggregationField(dimension)) == true)
         {
             validationResult.AddError("--aggregate-by accepts span field or custom attribute names without brackets or quotes.", "Invalid aggregate-by.");

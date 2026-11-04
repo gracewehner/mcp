@@ -5,7 +5,7 @@ using Microsoft.Mcp.Core.Commands;
 
 namespace Azure.Mcp.Tools.Monitor.Validation;
 
-internal static class TraceWindowValidator
+internal static class TraceQueryValidator
 {
     public static void ValidateWindow(DateTimeOffset start, DateTimeOffset end, ValidationResult result)
     {
