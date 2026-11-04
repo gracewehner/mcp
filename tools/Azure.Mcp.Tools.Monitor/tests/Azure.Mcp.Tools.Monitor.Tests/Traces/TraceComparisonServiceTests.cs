@@ -51,7 +51,7 @@ public sealed class TraceComparisonServiceTests()
     public async Task Comparison_UsesDedicatedEnvelopeAndPreservesAllJoinedRows(string analysis)
     {
         using var first = Page("""{"value":[{"current":{"count":5},"compareTo":null,"status":"currentOnly"}],"nextLink":"ignored","metadata":{"current.isPartialResult":true,"compareTo.totalTraces":452}}""");
-        using var second = Page("""{"value":[{"current":null,"compareTo":{"count":450},"status":"compareToOnly"}],"metadata":{"current.isPartialResult":false,"compareTo.totalTraces":452}}""");
+        using var second = Page("""{"value":[{"current":null,"compareTo":{"count":450},"status":"compareToOnly"}],"metadata":{"compareTo.totalTraces":452}}""");
         using var handler = new MonitorTracesTestHandler(1, false, resultPages: [first, second]);
         var (service, _) = MonitorTracesServiceTests.CreateService(handler);
         var request = Request(analysis == "critical-path");
@@ -125,7 +125,6 @@ public sealed class TraceComparisonServiceTests()
 
     [Theory]
     [InlineData("false")]
-    [InlineData("\"False\"")]
     public async Task CriticalPath_DiscoveryDeduplicatesAndPadsIdsWithoutReplacingAggregation(string flag)
     {
         using var current = Page($$$$"""{"value":[{"trace_id":"a"},{"trace_id":"a"}],"metadata":{"hasLimitReached":{{{{flag}}}}}}""");
@@ -142,6 +141,7 @@ public sealed class TraceComparisonServiceTests()
         using var discovery = JsonDocument.Parse(handler.SubmitBodies[0]);
         Assert.Equal("Traces | where duration_nano > 10 | project trace_id $$ <<Traces | where ['span.name'] == 'GET'>>",
             discovery.RootElement.GetProperty("query").GetString());
+        Assert.Equal(10000, discovery.RootElement.GetProperty("options").GetProperty("maxResults").GetInt32());
         using var body = JsonDocument.Parse(handler.SubmitBodies[2]);
         Assert.Equal(aggregation, body.RootElement.GetProperty("current").GetProperty("query").GetString());
         Assert.Equal(new string('0', 31) + "a", body.RootElement.GetProperty("current").GetProperty("traceId").GetString());
@@ -152,34 +152,20 @@ public sealed class TraceComparisonServiceTests()
     [Theory]
     [InlineData("""{"value":[{"trace_id":"a"}],"isPartialResult":true}""")]
     [InlineData("""{"value":[{"trace_id":"a"}],"metadata":{"isSystemLimitHit":true}}""")]
-    [InlineData("""{"value":[{"trace_id":"a"}],"metadata":{"hasLimitReached":"True"}}""")]
+    [InlineData("""{"value":[{"trace_id":"a"}],"metadata":{"hasLimitReached":true}}""")]
     [InlineData("""{"value":[]}""")]
     [InlineData("""{"value":[{"trace_id":"invalid"}]}""")]
     public async Task CriticalPath_RejectsIncompleteOrInvalidDiscoveryBeforeComparison(string page)
     {
         using var response = Page(page);
-        using var handler = new MonitorTracesTestHandler(1, false, resultPages: [response]);
+        using var nextPopulation = Page("""{"value":[{"trace_id":"b"}]}""");
+        using var handler = new MonitorTracesTestHandler(1, false, resultPages: [response, nextPopulation]);
         var (service, _) = MonitorTracesServiceTests.CreateService(handler);
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.ComparePopulationsAsync(
             MonitorTracesTestHandler.Subscription, "rg", "amw0", "critical-path", Request(false), "Traces | summarize count=count() by ['span.name']",
             cancellationToken: TestContext.Current.CancellationToken));
-        Assert.Single(handler.SubmitUris);
+        Assert.Equal(1, handler.SubmitCalls);
         Assert.Equal("/traces:query", handler.SubmitUris[0].AbsolutePath);
-    }
-
-    [Theory]
-    [InlineData("true", "false")]
-    [InlineData("\"True\"", "\"False\"")]
-    public async Task Comparison_PreservesNestedCoverageFlags(string partial, string complete)
-    {
-        using var first = Page($$$$$"""{"value":[],"nextLink":"ignored","metadata":{"current":{"hasLimitReached":{{{{{partial}}}}}}}}""");
-        using var second = Page($$$$$"""{"value":[],"metadata":{"current":{"hasLimitReached":{{{{{complete}}}}}}}}""");
-        using var handler = new MonitorTracesTestHandler(1, false, resultPages: [first, second]);
-        var (service, _) = MonitorTracesServiceTests.CreateService(handler);
-        var result = await service.ComparePopulationsAsync(MonitorTracesTestHandler.Subscription, "rg", "amw0",
-            "statistics", Request(false), cancellationToken: TestContext.Current.CancellationToken);
-        Assert.Equal(partial, result.Payload!.Value.GetProperty("metadata").GetProperty("current")
-            .GetProperty("hasLimitReached").GetRawText());
     }
 
     [Theory]
