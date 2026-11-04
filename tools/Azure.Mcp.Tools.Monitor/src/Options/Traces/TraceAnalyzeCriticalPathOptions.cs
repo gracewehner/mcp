@@ -29,10 +29,10 @@ public sealed class TraceAnalyzeCriticalPathOptions : ISubscriptionOption
     [Option(Description = "Query end time in UTC ISO 8601.")]
     public required DateTimeOffset EndTime { get; set; }
 
-    [Option(Description = "Up to 3 span fields or custom attribute names to group by, for example span.service.name or span.attributes.guid:x-request-id. Default span.name. No brackets or quotes.")]
+    [Option(Description = "Span fields or custom attribute names to group by, for example span.service.name or span.attributes.guid:x-request-id. Default span.name. No brackets or quotes.")]
     public string[]? AggregateBy { get; set; }
 
-    [Option(Description = "Up to 5 percentiles, each 1-99. Defaults to 50 95 99.")]
+    [Option(Description = "Percentiles, each 1-99. Defaults to 50 95 99.")]
     public int[]? Percentiles { get; set; }
 
     [Option(Description = "Span-name prefixes whose subtrees are removed entirely before critical-path scoring.")]

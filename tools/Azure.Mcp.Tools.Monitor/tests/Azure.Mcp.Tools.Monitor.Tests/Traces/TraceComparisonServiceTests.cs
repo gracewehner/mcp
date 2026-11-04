@@ -50,8 +50,8 @@ public sealed class TraceComparisonServiceTests()
     [InlineData("critical-path")]
     public async Task Comparison_UsesDedicatedEnvelopeAndPreservesAllJoinedRows(string analysis)
     {
-        using var first = Page("""{"value":[{"current":{"count":5},"compareTo":null,"status":"currentOnly"}],"nextLink":"ignored","metadata":{"current.isPartialResult":true,"compareTo.totalTraces":452}}""");
-        using var second = Page("""{"value":[{"current":null,"compareTo":{"count":450},"status":"compareToOnly"}],"metadata":{"compareTo.totalTraces":452}}""");
+        using var first = Page("""{"value":[{"current":{"count":5},"compareTo":null,"status":"currentOnly"}],"nextLink":"ignored","isPartialResult":true,"totalTraces":452}""");
+        using var second = Page("""{"value":[{"current":null,"compareTo":{"count":450},"status":"compareToOnly"}],"isPartialResult":false}""");
         using var handler = new MonitorTracesTestHandler(1, false, resultPages: [first, second]);
         var (service, _) = MonitorTracesServiceTests.CreateService(handler);
         var request = Request(analysis == "critical-path");
@@ -84,8 +84,8 @@ public sealed class TraceComparisonServiceTests()
         }
         Assert.Equal("Succeeded", result.Status);
         Assert.Equal(2, result.Payload!.Value.GetProperty("value").GetArrayLength());
-        Assert.True(result.Payload.Value.GetProperty("metadata").GetProperty("current.isPartialResult").GetBoolean());
-        Assert.Equal(452, result.Payload.Value.GetProperty("metadata").GetProperty("compareTo.totalTraces").GetInt32());
+        Assert.True(result.Payload.Value.GetProperty("isPartialResult").GetBoolean());
+        Assert.Equal(452, result.Payload.Value.GetProperty("totalTraces").GetInt32());
         Assert.False(result.OutputLimitReached);
 
         await service.ResumeQueryAsync(MonitorTracesTestHandler.Subscription, "rg", "amw0", result.OperationId!,

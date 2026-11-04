@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Net;
 using System.Text.Json;
 using Azure.Core;
 using Azure.Core.Pipeline;
@@ -486,13 +487,32 @@ public sealed partial class MonitorTracesService(
             throw DataPlaneFailure("query submit", response);
         }
 
-        using var doc = JsonDocument.Parse(payload);
-        if (!doc.RootElement.TryGetProperty("operationId", out var opId) || opId.ValueKind != JsonValueKind.String)
+        if (string.IsNullOrWhiteSpace(payload))
         {
-            throw new InvalidOperationException($"Trace query submit response missing operationId: {Truncate(payload)}");
+            throw new HttpRequestException("Trace query submit response is empty.", null, HttpStatusCode.BadGateway);
         }
 
-        return opId.GetString()!;
+        JsonDocument doc;
+        try
+        {
+            doc = JsonDocument.Parse(payload);
+        }
+        catch (JsonException ex)
+        {
+            throw new HttpRequestException("Trace query submit response contains malformed JSON.", ex, HttpStatusCode.BadGateway);
+        }
+        using (doc)
+        {
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !doc.RootElement.TryGetProperty("operationId", out var opId)
+                || opId.ValueKind != JsonValueKind.String
+                || string.IsNullOrWhiteSpace(opId.GetString()))
+            {
+                throw new HttpRequestException("Trace query submit response is missing a string operationId.", null, HttpStatusCode.BadGateway);
+            }
+
+            return opId.GetString()!;
+        }
     }
 
     private async Task<TraceQueryResult> PollForResultsAsync(

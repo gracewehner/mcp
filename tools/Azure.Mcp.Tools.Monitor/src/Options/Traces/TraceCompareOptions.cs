@@ -27,7 +27,7 @@ public sealed class TraceCompareOptions()
     [Option(Description = "Comparison end time, UTC ISO 8601.")]
     public string? CompareEndTime { get; set; }
 
-    [Option(Description = "Trace sample size per population. Default 10000; range 1..10000. This is not the number of returned comparison rows.")]
+    [Option(Description = "Trace sample size per population. Defaults to 10000 and is clamped to 1..10000. This is not the number of returned comparison rows.")]
     public int? MaxResults { get; set; }
 
     [Option(Description = "The Azure Monitor Workspace resource name enabled for Trace Store.")]

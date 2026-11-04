@@ -27,7 +27,7 @@ public sealed class TraceCompareCriticalPathOptions()
     [Option(Description = "Comparison end time, UTC ISO 8601.")]
     public string? CompareEndTime { get; set; }
 
-    [Option(Description = "Trace sample size per population. Default 10000; range 1..10000. This is not the number of returned comparison rows.")]
+    [Option(Description = "Trace sample size per population. Defaults to 10000 and is clamped to 1..10000. This is not the number of returned comparison rows.")]
     public int? MaxResults { get; set; }
 
     [Option(Description = "Critical-path only: 1..1000 explicit current trace IDs (32 hexadecimal characters or GUIDs), instead of --query.")]
@@ -39,7 +39,7 @@ public sealed class TraceCompareCriticalPathOptions()
     [Option(Description = "Critical-path only: grouping fields. Default span.name; maximum 3. Accepts bare or bracket-quoted field names.")]
     public string[]? AggregateBy { get; set; }
 
-    [Option(Description = "Critical-path only: up to 5 percentiles, each 1..99. Default 50, 95, 99.")]
+    [Option(Description = "Critical-path only: percentiles, each 1..99. Default 50, 95, 99.")]
     public int[]? Percentiles { get; set; }
 
     [Option(Description = "Critical-path only: resolve linked traces. Default false.")]

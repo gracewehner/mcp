@@ -25,8 +25,6 @@ public sealed class TraceCompareStatisticsCommandTests()
     [InlineData("--query Traces", false)]
     [InlineData("--compare-query Traces", false)]
     [InlineData("--query Traces --compare-start-time 2026-01-01T00:00:00Z", false)]
-    [InlineData("--query Traces --compare-query Traces --max-results 0", false)]
-    [InlineData("--query Traces --compare-query Traces --max-results 10001", false)]
     [InlineData("--query Traces --compare-query Traces --include-samples false", false)]
     [InlineData("--query Traces --compare-query Traces --compare-start-time 2025-12-30T00:00:00Z --compare-end-time 2026-01-01T01:00:00Z", false)]
     public async Task ValidatesIndependentPopulationsBeforeService(string args, bool valid)
@@ -48,6 +46,23 @@ public sealed class TraceCompareStatisticsCommandTests()
                 Arg.Is<TraceComparisonRequest>(request => request.Current.Options!.MaxResults == 10000),
                 null, Arg.Any<string?>(), Arg.Any<CancellationToken>());
         }
+    }
+
+    [Theory]
+    [InlineData(0, 1)]
+    [InlineData(10001, 10000)]
+    public async Task ClampsMaxResults(int requested, int expected)
+    {
+        Service.ComparePopulationsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<TraceComparisonRequest>(), Arg.Any<string?>(), Arg.Any<string?>(),
+            Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "operation" });
+
+        var response = await ExecuteCommandAsync($"{Target} --query Traces --compare-query Traces --max-results {requested}");
+
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        await Service.Received(1).ComparePopulationsAsync("sub", "rg", "amw", "statistics",
+            Arg.Is<TraceComparisonRequest>(request => request.Current.Options!.MaxResults == expected),
+            null, Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Theory]
