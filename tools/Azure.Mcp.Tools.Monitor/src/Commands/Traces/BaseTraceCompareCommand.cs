@@ -53,10 +53,7 @@ public abstract class BaseTraceCompareCommand(
             {
                 Reject("--aggregate-by accepts at most 3 valid field names.");
             }
-            if (options.Percentiles is { Length: > 5 } || options.Percentiles?.Any(p => p is < 1 or > 99) == true)
-            {
-                Reject("--percentiles accepts at most 5 values between 1 and 99.");
-            }
+            TraceAnalysisValidator.ValidateCriticalPathPercentiles(options.Percentiles, validationResult);
         }
         else
         {
@@ -108,15 +105,9 @@ public abstract class BaseTraceCompareCommand(
                     TraceId = options.CompareTraceIds is null ? null : string.Join(",", options.CompareTraceIds.Select(id => id.Trim())),
                 },
             };
-            string? aggregation = null;
-            if (criticalPath)
-            {
-                var percentiles = options.Percentiles is { Length: > 0 } ? options.Percentiles : [50, 95, 99];
-                var dimensions = options.AggregateBy is { Length: > 0 } ? options.AggregateBy : ["span.name"];
-                string clauses = string.Join(", ", percentiles.Select(p => FormattableString.Invariant($"p{p}=percentile(duration_nano, {p})")));
-                string grouping = string.Join(", ", dimensions.Select(field => $"['{NormalizeField(field)}']"));
-                aggregation = $"Traces | summarize {clauses} by {grouping}";
-            }
+            string? aggregation = criticalPath
+                ? TraceCriticalPathQueryBuilder.Build(options.AggregateBy?.Select(NormalizeField).ToArray(), options.Percentiles)
+                : null;
             TraceQueryResult result = await service.ComparePopulationsAsync(
                 options.Subscription!, options.ResourceGroup, options.Workspace, analysis, request,
                 aggregation, options.Tenant, cancellationToken);
