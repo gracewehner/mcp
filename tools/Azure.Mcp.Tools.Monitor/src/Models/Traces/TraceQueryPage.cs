@@ -36,48 +36,22 @@ internal sealed class TraceQueryPage()
         foreach (var property in previousPage.Properties)
         {
             if (!Properties.TryGetValue(property.Key, out var current) ||
-                (IsPartialFlag(property.Key) && IsPartialFlagSet(property.Value)))
+                (property.Key is "hasLimitReached" or "isPartialResult" or "isSystemLimitHit" &&
+                 property.Value.ValueKind == JsonValueKind.True && current.ValueKind == JsonValueKind.False))
             {
                 Properties[property.Key] = property.Value;
             }
             else if (property.Key == "metadata" && property.Value.ValueKind == JsonValueKind.Object
                 && current.ValueKind == JsonValueKind.Object)
             {
-                Properties[property.Key] = MergeMetadata(current, property.Value);
+                // Later pages can omit an earlier page's truncation warning.
+                var metadata = current.EnumerateObject().ToDictionary(item => item.Name, item => item.Value);
+                foreach (var item in property.Value.EnumerateObject())
+                {
+                    metadata.TryAdd(item.Name, item.Value);
+                }
+                Properties[property.Key] = JsonSerializer.SerializeToElement(metadata, MonitorJsonContext.Default.DictionaryStringJsonElement);
             }
         }
     }
-
-    // Coverage can be nested or population-prefixed; later pages must not erase an earlier limit.
-    private static JsonElement MergeMetadata(JsonElement current, JsonElement previous)
-    {
-        var merged = current.EnumerateObject().ToDictionary(property => property.Name, property => property.Value);
-        foreach (var property in previous.EnumerateObject())
-        {
-            if (!merged.TryGetValue(property.Name, out var value)
-                || (IsPartialFlag(property.Name) && IsPartialFlagSet(property.Value)))
-            {
-                merged[property.Name] = property.Value;
-            }
-            else if (value.ValueKind == JsonValueKind.Object && property.Value.ValueKind == JsonValueKind.Object)
-            {
-                merged[property.Name] = MergeMetadata(value, property.Value);
-            }
-        }
-        return JsonSerializer.SerializeToElement(merged, MonitorJsonContext.Default.DictionaryStringJsonElement);
-    }
-
-    internal static bool IsPartialFlag(string name) =>
-        name is "isPartialResult" or "isSystemLimitHit" or "hasLimitReached"
-        || name.EndsWith(".isPartialResult", StringComparison.Ordinal)
-        || name.EndsWith(".isSystemLimitHit", StringComparison.Ordinal)
-        || name.EndsWith(".hasLimitReached", StringComparison.Ordinal);
-
-    // Backend metadata can encode coverage flags as boolean strings.
-    internal static bool IsPartialFlagSet(JsonElement value) => value.ValueKind switch
-    {
-        JsonValueKind.False => false,
-        JsonValueKind.String when bool.TryParse(value.GetString(), out bool isPartial) => isPartial,
-        _ => true,
-    };
 }

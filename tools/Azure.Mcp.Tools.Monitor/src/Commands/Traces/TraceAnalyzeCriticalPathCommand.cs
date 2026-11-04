@@ -67,9 +67,9 @@ public sealed class TraceAnalyzeCriticalPathCommand(
         try
         {
             var query = BuildCriticalPathQuery(options.AggregateBy, options.Percentiles);
-            var settings = new TraceCriticalPathSettings
+            var body = new TraceQueryOptionsBody
             {
-                TraceIds = options.TraceIds,
+                MaxResults = options.MaxResults ?? 10,
                 ResolveTraceLinks = options.ResolveTraceLinks ?? false,
                 IncludeSamples = options.IncludeSamples ?? true,
                 IncludeRollups = options.IncludeRollups ?? false,
@@ -78,7 +78,7 @@ public sealed class TraceAnalyzeCriticalPathCommand(
             };
             var result = await tracesService.CriticalPathAsync(
                 options.Subscription!, options.ResourceGroup, options.Workspace, query,
-                options.StartTime, options.EndTime, options.MaxResults ?? 10, settings,
+                options.StartTime, options.EndTime, options.TraceIds, body,
                 options.Tenant, cancellationToken);
             context.Response.Results = ResponseResult.Create(
                 new TraceQueryCommandResult(result), MonitorJsonContext.Default.TraceQueryCommandResult);
@@ -99,7 +99,7 @@ public sealed class TraceAnalyzeCriticalPathCommand(
         return $"Traces | summarize {string.Join(", ", clauses)} by {string.Join(", ", dimensions.Select(d => $"['{d}']"))}";
     }
 
-    private static bool IsAggregationField(string? value) =>
+    internal static bool IsAggregationField(string? value) =>
         value is { Length: > 0 and <= 1024 } &&
         // Custom attribute keys can contain colons and hyphens, but cannot escape the quoted KQL field.
         Regex.IsMatch(value, @"\A[a-zA-Z_][a-zA-Z0-9_.:-]*\z", RegexOptions.NonBacktracking);

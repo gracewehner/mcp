@@ -198,7 +198,7 @@ public sealed class MonitorTracesService(
         string? tenant = null,
         CancellationToken cancellationToken = default) =>
         RunOperationAsync(subscription, resourceGroup, workspace, query, startTime, endTime,
-            maxResults, false, CompareEndpointPath, null, tenant, cancellationToken);
+            new() { MaxResults = maxResults }, false, CompareEndpointPath, null, tenant, cancellationToken);
 
     public Task<TraceQueryResult> CriticalPathAsync(
         string subscription,
@@ -207,12 +207,12 @@ public sealed class MonitorTracesService(
         string query,
         DateTimeOffset startTime,
         DateTimeOffset endTime,
-        int maxResults,
-        TraceCriticalPathSettings settings,
+        string[] traceIds,
+        TraceQueryOptionsBody options,
         string? tenant = null,
         CancellationToken cancellationToken = default) =>
         RunOperationAsync(subscription, resourceGroup, workspace, query, startTime, endTime,
-            maxResults, false, CriticalPathEndpointPath, settings, tenant, cancellationToken);
+            options, false, CriticalPathEndpointPath, string.Join(",", traceIds), tenant, cancellationToken);
 
     public Task<TraceQueryResult> RunQueryAsync(
         string subscription,
@@ -226,7 +226,7 @@ public sealed class MonitorTracesService(
         string? tenant = null,
         CancellationToken cancellationToken = default) =>
         RunOperationAsync(subscription, resourceGroup, workspace, query, startTime, endTime,
-            maxResults, includeSpans, QueryEndpointPath, null, tenant, cancellationToken);
+            new() { MaxResults = maxResults }, includeSpans, QueryEndpointPath, null, tenant, cancellationToken);
 
     private async Task<TraceQueryResult> RunOperationAsync(
         string subscription,
@@ -235,10 +235,10 @@ public sealed class MonitorTracesService(
         string query,
         DateTimeOffset startTime,
         DateTimeOffset endTime,
-        int maxResults,
+        TraceQueryOptionsBody options,
         bool includeSpans,
         string endpointPath,
-        TraceCriticalPathSettings? settings,
+        string? traceId,
         string? tenant,
         CancellationToken cancellationToken)
     {
@@ -251,10 +251,10 @@ public sealed class MonitorTracesService(
         var session = await OpenSessionAsync(subscription, resourceGroup, workspace, tenant, cancellationToken).ConfigureAwait(false);
 
         string operationId = await SendSubmitAsync(
-            session, query, startTime, endTime, maxResults, endpointPath, settings, cancellationToken);
+            session, query, startTime, endTime, options, endpointPath, traceId, cancellationToken);
 
         // Compare samples traces, but returns attribute rows: a lower sample must not stop result paging.
-        var maxRows = endpointPath == CompareEndpointPath ? MaxResumeRows : maxResults;
+        var maxRows = endpointPath == CompareEndpointPath ? MaxResumeRows : options.MaxResults;
         return await PollForResultsAsync(
             session, operationId, Math.Min(maxRows, 1000), maxRows, includeSpans, cancellationToken);
     }
@@ -442,9 +442,9 @@ public sealed class MonitorTracesService(
         string query,
         DateTimeOffset startTime,
         DateTimeOffset endTime,
-        int maxResults,
+        TraceQueryOptionsBody options,
         string endpointPath,
-        TraceCriticalPathSettings? settings,
+        string? traceId,
         CancellationToken cancellationToken)
     {
         var submitUrl = $"{session.EndpointBase}/{endpointPath}?preserveQueryFieldNames=true&api-version={TraceDataPlaneApiVersion}";
@@ -459,16 +459,8 @@ public sealed class MonitorTracesService(
                 StartTime = FormatUtc(startTime),
                 EndTime = FormatUtc(endTime),
             },
-            TraceId = settings is null ? null : string.Join(",", settings.TraceIds),
-            Options = new TraceQueryOptionsBody
-            {
-                MaxResults = maxResults,
-                ResolveTraceLinks = settings?.ResolveTraceLinks,
-                IncludeSamples = settings?.IncludeSamples,
-                IncludeRollups = settings?.IncludeRollups,
-                ExcludeSubtreePrefixes = settings?.ExcludeSubtreePrefixes,
-                DeprioritizeSubtreePrefixes = settings?.DeprioritizeSubtreePrefixes,
-            },
+            TraceId = traceId,
+            Options = options,
         };
 
         using var content = RequestContent.Create(

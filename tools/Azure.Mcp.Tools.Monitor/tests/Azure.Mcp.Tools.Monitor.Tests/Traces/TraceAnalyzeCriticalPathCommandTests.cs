@@ -25,7 +25,7 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
     {
         Service.CriticalPathAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<TraceCriticalPathSettings>(),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<string[]>(), Arg.Any<TraceQueryOptionsBody>(),
             Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(new TraceQueryResult { Status = "Running", OperationId = "op-critical" });
 
@@ -42,8 +42,8 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
             : "Traces | summarize p50=percentile(duration_nano, 50), p95=percentile(duration_nano, 95), p99=percentile(duration_nano, 99) by ['span.name']";
         await Service.Received(1).CriticalPathAsync(
             "sub", "rg", "amw", expectedQuery, Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(),
-            custom ? 1000 : 10,
-            Arg.Is<TraceCriticalPathSettings>(settings => settings.TraceIds.SequenceEqual(new[] { Id })
+            Arg.Is<string[]>(ids => ids.SequenceEqual(new[] { Id })),
+            Arg.Is<TraceQueryOptionsBody>(settings => settings.MaxResults == (custom ? 1000 : 10)
                 && settings.IncludeSamples == !custom && settings.IncludeRollups == custom
                 && settings.ResolveTraceLinks == custom
                 && (!custom || (settings.ExcludeSubtreePrefixes!.SequenceEqual(new[] { "sql.", "redis." })
@@ -77,7 +77,7 @@ public sealed class TraceAnalyzeCriticalPathCommandTests : SubscriptionCommandUn
     {
         Service.CriticalPathAsync(
             Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
-            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<TraceCriticalPathSettings>(),
+            Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<string[]>(), Arg.Any<TraceQueryOptionsBody>(),
             Arg.Any<string?>(), Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "op-critical" });
 
         var response = await ExecuteCommandAsync($"{Target} {Window} --trace-ids {string.Join(" ", Enumerable.Repeat(Id, count))}");

@@ -49,7 +49,7 @@ public sealed class TraceAnalyzeTopAttributesCommand(
         {
             validationResult.AddError("The selection window must be contained within the overall window.", "Invalid selection window.");
         }
-        if (!TraceAnalysisValidator.IsAnalysisIdentifier(options.SelectionField))
+        if (!IsIdentifier(options.SelectionField))
         {
             validationResult.AddError("--selection-field must be a bare identifier using letters, digits, underscores, and dots.", "Invalid selection-field.");
         }
@@ -98,6 +98,10 @@ public sealed class TraceAnalyzeTopAttributesCommand(
         }
         return context.Response;
     }
+
+    private static bool IsIdentifier(string? value) =>
+        value is { Length: > 0 and <= 1024 } &&
+        Regex.IsMatch(value, @"\A[a-zA-Z_][a-zA-Z0-9_.]*\z", RegexOptions.NonBacktracking);
 
     private static bool IsLiteral(string? value) =>
         value is { Length: > 0 and <= 4096 } &&

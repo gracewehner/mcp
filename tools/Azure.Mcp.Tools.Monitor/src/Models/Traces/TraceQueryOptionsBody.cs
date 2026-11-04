@@ -5,7 +5,7 @@ using System.Text.Json.Serialization;
 
 namespace Azure.Mcp.Tools.Monitor.Models.Traces;
 
-internal sealed class TraceQueryOptionsBody
+public sealed class TraceQueryOptionsBody
 {
     public required int MaxResults { get; init; }
 

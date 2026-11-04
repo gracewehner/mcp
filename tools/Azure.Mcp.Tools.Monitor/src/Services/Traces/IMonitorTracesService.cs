@@ -26,8 +26,8 @@ public interface IMonitorTracesService
         string query,
         DateTimeOffset startTime,
         DateTimeOffset endTime,
-        int maxResults,
-        TraceCriticalPathSettings settings,
+        string[] traceIds,
+        TraceQueryOptionsBody options,
         string? tenant = null,
         CancellationToken cancellationToken = default);
 

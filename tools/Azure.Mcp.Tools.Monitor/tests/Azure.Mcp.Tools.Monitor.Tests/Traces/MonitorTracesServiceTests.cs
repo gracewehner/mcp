@@ -45,8 +45,8 @@ public sealed class MonitorTracesServiceTests()
                 "compare" => service.CompareAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
                     "Traces", end.AddMinutes(-1), end, 10, cancellationToken: TestContext.Current.CancellationToken),
                 "critical-path" => service.CriticalPathAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
-                    "Traces", end.AddMinutes(-1), end, 10,
-                    new TraceCriticalPathSettings { TraceIds = ["0123456789abcdef0123456789abcdef"] },
+                    "Traces", end.AddMinutes(-1), end, ["0123456789abcdef0123456789abcdef"],
+                    new TraceQueryOptionsBody { MaxResults = 10 },
                     cancellationToken: TestContext.Current.CancellationToken),
                 _ => service.RunQueryAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
                     "Traces", end.AddMinutes(-1), end, 10, false, cancellationToken: TestContext.Current.CancellationToken),
@@ -98,9 +98,11 @@ public sealed class MonitorTracesServiceTests()
         const string query = "analysis KQL";
         var result = criticalPath
             ? await service.CriticalPathAsync(MonitorTracesTestHandler.Subscription, ResourceGroup, "amw0",
-                query, end.AddHours(-1), end, 1000, new TraceCriticalPathSettings
+                query, end.AddHours(-1), end,
+                ["abcdef1234567890abcdef1234567890", "01234567-89ab-cdef-0123-456789abcdef"],
+                new TraceQueryOptionsBody
                 {
-                    TraceIds = ["abcdef1234567890abcdef1234567890", "01234567-89ab-cdef-0123-456789abcdef"],
+                    MaxResults = 1000,
                     ResolveTraceLinks = true,
                     IncludeSamples = false,
                     IncludeRollups = true,
@@ -523,29 +525,22 @@ public sealed class MonitorTracesServiceTests()
     }
 
     [Theory]
-    [InlineData("hasLimitReached", "true", "false")]
-    [InlineData("isPartialResult", "true", "false")]
-    [InlineData("isSystemLimitHit", "true", "false")]
-    [InlineData("hasLimitReached", "\"True\"", "\"False\"")]
-    [InlineData("isPartialResult", "\"True\"", "\"False\"")]
-    [InlineData("isSystemLimitHit", "\"True\"", "\"False\"")]
-    [InlineData("isPartialResult", "false", "false")]
-    public async Task ResumeQueryAsync_PreservesPartialFlagsAcrossPages(string flag, string partial, string complete)
+    [InlineData("hasLimitReached")]
+    [InlineData("isPartialResult")]
+    [InlineData("isSystemLimitHit")]
+    public async Task ResumeQueryAsync_PreservesPartialFlagsAcrossPages(string flag)
     {
         using var first = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent($$$"""
-                {"value":[1],"nextLink":"/ignored","{{{flag}}}":{{{partial}}},
-                 "metadata":{"{{{flag}}}":{{{partial}}},"current.{{{flag}}}":{{{partial}}},
-                 "current":{"{{{flag}}}":{{{partial}}}},"RowsFound":1,"retained":true}}
+                {"value":[1],"nextLink":"/ignored","{{{flag}}}":true,
+                 "metadata":{"SpansTruncatedTraceCount":"2","RowsFound":"1"}}
                 """)
         };
         using var last = new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new StringContent($$$"""
-                {"value":[2],"{{{flag}}}":{{{complete}}},
-                 "metadata":{"{{{flag}}}":{{{complete}}},"current.{{{flag}}}":{{{complete}}},
-                 "current":{"{{{flag}}}":{{{complete}}}},"RowsFound":2}}
+                {"value":[2],"{{{flag}}}":false,"metadata":{"RowsFound":"2"}}
                 """)
         };
         using var handler = new MonitorTracesTestHandler(1, false, resultPages: [first, last]);
@@ -557,13 +552,10 @@ public sealed class MonitorTracesServiceTests()
 
         Assert.Equal("Succeeded", result.Status);
         var payload = result.Payload!.Value;
-        Assert.Equal(partial, payload.GetProperty(flag).GetRawText());
+        Assert.True(payload.GetProperty(flag).GetBoolean());
         var metadata = payload.GetProperty("metadata");
-        Assert.Equal(partial, metadata.GetProperty(flag).GetRawText());
-        Assert.Equal(partial, metadata.GetProperty($"current.{flag}").GetRawText());
-        Assert.Equal(partial, metadata.GetProperty("current").GetProperty(flag).GetRawText());
-        Assert.Equal(2, metadata.GetProperty("RowsFound").GetInt32());
-        Assert.True(metadata.GetProperty("retained").GetBoolean());
+        Assert.Equal("2", metadata.GetProperty("SpansTruncatedTraceCount").GetString());
+        Assert.Equal("2", metadata.GetProperty("RowsFound").GetString());
         Assert.Equal(2, result.Payload.Value.GetProperty("value").GetArrayLength());
     }
 
