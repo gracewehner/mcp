@@ -37,7 +37,6 @@ public abstract class BaseTraceCompareCommand<
         {
             ValidateWindow(options.CompareStartTime, options.CompareEndTime, "comparison", validationResult);
         }
-        TraceAnalysisValidator.ValidateAnalysisMaxResults(options.MaxResults, 10000, validationResult);
         foreach (string? query in new[] { options.Query, options.CompareQuery })
         {
             if (query is not null && (string.IsNullOrWhiteSpace(query) || query.Length > 100000))
@@ -58,7 +57,7 @@ public abstract class BaseTraceCompareCommand<
             {
                 Reject("--aggregate-by accepts at most 3 valid field names.");
             }
-            TraceAnalysisValidator.ValidateCriticalPathPercentiles(criticalPathOptions.Percentiles, validationResult);
+            TraceAnalyzeCriticalPathCommand.ValidateCriticalPathPercentiles(criticalPathOptions.Percentiles, validationResult);
         }
         else
         {
@@ -94,7 +93,7 @@ public abstract class BaseTraceCompareCommand<
                     TraceId = criticalPathOptions?.TraceIds is null ? null : string.Join(",", criticalPathOptions.TraceIds.Select(id => id.Trim())),
                     Options = new()
                     {
-                        MaxResults = options.MaxResults ?? 10000,
+                        MaxResults = Math.Clamp(options.MaxResults ?? 10000, 1, 10000),
                         ResolveTraceLinks = criticalPath ? criticalPathOptions!.ResolveTraceLinks ?? false : null,
                         IncludeSamples = criticalPath ? criticalPathOptions!.IncludeSamples ?? true : null,
                         IncludeRollups = criticalPath ? criticalPathOptions!.IncludeRollups ?? false : null,
@@ -144,7 +143,12 @@ public abstract class BaseTraceCompareCommand<
             validation.AddError(message, message);
             return;
         }
-        TraceAnalysisValidator.ValidateAnalysisWindow(startTime, endTime, validation);
+        var windowValidation = new ValidationResult();
+        TraceQueryValidator.ValidateWindow(startTime, endTime, windowValidation);
+        foreach (string error in windowValidation.Errors)
+        {
+            validation.AddError($"The {population} window: {error}", error);
+        }
     }
 
     private static void ValidateSelection(string[]? ids, string? query, string population, ValidationResult validation)

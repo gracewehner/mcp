@@ -60,7 +60,6 @@ public sealed class TraceCompareCriticalPathCommandTests()
     [InlineData("--query Traces --compare-query Traces --aggregate-by evil/field", false)]
     [InlineData("--query Traces --compare-query Traces --percentiles 100", false)]
     [InlineData("--query Traces --compare-query Traces --percentiles 0", false)]
-    [InlineData("--query Traces --compare-query Traces --percentiles 1 2 3 4 5 6", false)]
     public async Task ValidatesIdsFiltersAndGrouping(string args, bool valid)
     {
         Service.ComparePopulationsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
@@ -79,6 +78,23 @@ public sealed class TraceCompareCriticalPathCommandTests()
                 "Traces | summarize p50=percentile(duration_nano, 50), p95=percentile(duration_nano, 95), p99=percentile(duration_nano, 99) by ['span.name']",
                 Arg.Any<string?>(), Arg.Any<CancellationToken>());
         }
+    }
+
+    [Fact]
+    public async Task AcceptsMoreThanFiveValidPercentiles()
+    {
+        Service.ComparePopulationsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<TraceComparisonRequest>(), Arg.Any<string?>(), Arg.Any<string?>(),
+            Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "operation" });
+
+        var response = await ExecuteCommandAsync(
+            $"{Target} --query Traces --compare-query Traces --percentiles 1 2 3 4 5 6");
+
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        await Service.Received(1).ComparePopulationsAsync("sub", "rg", "amw", "critical-path",
+            Arg.Any<TraceComparisonRequest>(),
+            "Traces | summarize p1=percentile(duration_nano, 1), p2=percentile(duration_nano, 2), p3=percentile(duration_nano, 3), p4=percentile(duration_nano, 4), p5=percentile(duration_nano, 5), p6=percentile(duration_nano, 6) by ['span.name']",
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
