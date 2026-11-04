@@ -77,7 +77,7 @@ public sealed partial class MonitorTracesService
         string operationId = await SendSubmitAsync(session, discovery,
             DateTimeOffset.Parse(timeRange.StartTime, System.Globalization.CultureInfo.InvariantCulture),
             DateTimeOffset.Parse(timeRange.EndTime, System.Globalization.CultureInfo.InvariantCulture),
-            10000, QueryEndpointPath, null, cancellationToken);
+            new TraceQueryOptionsBody { MaxResults = 10000 }, QueryEndpointPath, null, cancellationToken);
         TraceQueryResult result = await PollForResultsAsync(session, operationId, 1000, 10000, false, cancellationToken);
         if (result.Status != "Succeeded" || result.OutputLimitReached || result.Payload is not { } payload
             || !payload.TryGetProperty("value", out var rows) || rows.ValueKind != JsonValueKind.Array
@@ -122,20 +122,18 @@ public sealed partial class MonitorTracesService
         {
             return false;
         }
-        foreach (var property in element.EnumerateObject())
+
+        static bool HasPartialFlag(IEnumerable<JsonProperty> properties) =>
+            properties.Any(property =>
+                property.Name is "hasLimitReached" or "isPartialResult" or "isSystemLimitHit"
+                && property.Value.ValueKind == JsonValueKind.True);
+
+        if (HasPartialFlag(element.EnumerateObject()))
         {
-            if (TraceQueryPage.IsPartialFlag(property.Name))
-            {
-                if (TraceQueryPage.IsPartialFlagSet(property.Value))
-                {
-                    return true;
-                }
-            }
-            else if (property.Value.ValueKind == JsonValueKind.Object && IsPartialComparisonDiscovery(property.Value))
-            {
-                return true;
-            }
+            return true;
         }
-        return false;
+        return element.TryGetProperty("metadata", out var metadata)
+            && metadata.ValueKind == JsonValueKind.Object
+            && HasPartialFlag(metadata.EnumerateObject());
     }
 }
