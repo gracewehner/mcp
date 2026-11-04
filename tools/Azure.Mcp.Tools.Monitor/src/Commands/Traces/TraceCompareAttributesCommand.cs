@@ -16,8 +16,9 @@ namespace Azure.Mcp.Tools.Monitor.Commands.Traces;
         Use for before/after deployments, different services or non-overlapping time windows.
         This calls traces:compare-attributes, not the selection-based traces:compare top-attributes operation.
         Returns all backend comparative rows, scores and coverage metadata; max-results selects traces per population,
-        not attribute rows. Requires subscription, resource-group, workspace, query, start-time, end-time
-        and compare-query or both comparison timestamps. Omitted comparison fields inherit the current population.
+        not attribute rows. Requires resource-group, workspace, query, start-time and end-time,
+        and compare-query or both comparison timestamps. Subscription may be omitted when an Azure CLI default is available.
+        Omitted comparison fields inherit the current population.
         Continue a running operation with monitor traces query resume using its operationId; never resubmit.
         Azure public cloud only; the caller needs workspace read access. Feature-disabled API errors surface directly.
         """,

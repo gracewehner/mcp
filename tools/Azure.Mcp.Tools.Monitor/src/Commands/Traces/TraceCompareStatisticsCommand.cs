@@ -16,8 +16,9 @@ namespace Azure.Mcp.Tools.Monitor.Commands.Traces;
         Use matching named aggregations and grouping keys in both queries; the backend validates shape compatibility.
         Returns joined current/compareTo/diff rows and coverage metadata without ranking or removing rows.
         Unlike selection-based attribute comparison, the populations can have disjoint time windows.
-        Requires subscription, resource-group, workspace, query, start-time and end-time, plus compare-query
-        or both comparison timestamps. Omitted comparison fields inherit the current population.
+        Requires resource-group, workspace, query, start-time and end-time, plus compare-query
+        or both comparison timestamps. Subscription may be omitted when an Azure CLI default is available.
+        Omitted comparison fields inherit the current population.
         A running result includes an operationId; continue with monitor traces query resume, never resubmit.
         Azure public cloud only; the caller needs workspace read access. Feature-disabled API errors surface directly.
         """,
