@@ -19,7 +19,7 @@ namespace Azure.Mcp.Tools.Monitor.Commands.Traces;
         Uses the same generated percentile/grouping shape for both populations. Default grouping span.name,
         percentiles 50/95/99, include-samples true, resolve-trace-links false and include-rollups false.
         Returns every backend joined current/compareTo/diff row and raw coverage metadata.
-        Requires subscription, resource-group, workspace, start-time and end-time.
+        Requires resource-group, workspace, start-time and end-time. Subscription may be omitted when an Azure CLI default is available.
         Continue a running comparison with monitor traces query resume using operationId; never resubmit.
         Azure public cloud only; the caller needs workspace read access. Feature-disabled API errors surface directly.
         """,
