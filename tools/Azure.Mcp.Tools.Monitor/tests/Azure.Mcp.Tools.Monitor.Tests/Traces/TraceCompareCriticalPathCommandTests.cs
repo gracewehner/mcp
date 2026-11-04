@@ -59,6 +59,8 @@ public sealed class TraceCompareCriticalPathCommandTests()
     [InlineData("--query \"Traces | summarize count=count() by trace_id\" --compare-query Traces", false)]
     [InlineData("--query Traces --compare-query Traces --aggregate-by evil/field", false)]
     [InlineData("--query Traces --compare-query Traces --percentiles 100", false)]
+    [InlineData("--query Traces --compare-query Traces --percentiles 0", false)]
+    [InlineData("--query Traces --compare-query Traces --percentiles 1 2 3 4 5 6", false)]
     public async Task ValidatesIdsFiltersAndGrouping(string args, bool valid)
     {
         Service.ComparePopulationsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
@@ -77,5 +79,22 @@ public sealed class TraceCompareCriticalPathCommandTests()
                 "Traces | summarize p50=percentile(duration_nano, 50), p95=percentile(duration_nano, 95), p99=percentile(duration_nano, 99) by ['span.name']",
                 Arg.Any<string?>(), Arg.Any<CancellationToken>());
         }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NormalizesGroupingBeforeBuildingCustomPercentiles()
+    {
+        Service.ComparePopulationsAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<string>(),
+            Arg.Any<string>(), Arg.Any<TraceComparisonRequest>(), Arg.Any<string?>(), Arg.Any<string?>(),
+            Arg.Any<CancellationToken>()).Returns(new TraceQueryResult { Status = "Succeeded", OperationId = "operation" });
+
+        var response = await ExecuteCommandAsync(
+            $"{Target} --query Traces --compare-query Traces --aggregate-by ['span.name'] span.service.name --percentiles 25 90");
+
+        Assert.Equal(HttpStatusCode.OK, response.Status);
+        await Service.Received(1).ComparePopulationsAsync("sub", "rg", "amw", "critical-path",
+            Arg.Any<TraceComparisonRequest>(),
+            "Traces | summarize p25=percentile(duration_nano, 25), p90=percentile(duration_nano, 90) by ['span.name'], ['span.service.name']",
+            Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 }
