@@ -1,0 +1,3 @@
+changes:
+  - section: "Bugs Fixed"
+    description: "Fix subscription attribution for Monitor Trace Store tool telemetry."

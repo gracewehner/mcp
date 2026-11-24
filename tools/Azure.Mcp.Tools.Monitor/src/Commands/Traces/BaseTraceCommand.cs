@@ -1,6 +1,7 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using Azure.Mcp.Core.Commands.Subscription;
@@ -24,6 +25,18 @@ public abstract class BaseTraceCommand<
     : SubscriptionCommand<TOptions, TResult>(subscriptionResolver)
     where TOptions : class, ISubscriptionOption
 {
+    private const string SubscriptionGuidTag = "AzSubscriptionGuid";
+
+    public override void PostBindOptions(TOptions options)
+    {
+        base.PostBindOptions(options);
+
+        if (Activity.Current is { OperationName: ActivityName.ToolExecuted } activity && options.Subscription is not null)
+        {
+            activity.SetTag(SubscriptionGuidTag, options.Subscription);
+        }
+    }
+
     protected override string GetErrorMessage(Exception ex) => ex switch
     {
         TraceQueryException queryError => queryError.Message,
